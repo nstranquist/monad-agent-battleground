@@ -1,0 +1,244 @@
+"use client";
+
+import { use, useState } from "react";
+import { useAccount, useReadContract, useWriteContract, useWaitForTransactionReceipt } from "wagmi";
+import { AGENT_NFT_ADDRESS, AGENT_NFT_ABI } from "@/lib/contracts";
+import { Agent } from "@/lib/types";
+import Link from "next/link";
+import { formatEther } from "viem";
+import { BATTLE_STAKE } from "@/lib/contracts";
+
+function getClass(str: number, spd: number, intel: number): string {
+  if (str >= 6) return "BERSERKER";
+  if (spd >= 6) return "SPEEDSTER";
+  if (intel >= 6) return "ORACLE";
+  if (str === spd && spd === intel) return "BALANCED";
+  if (str >= spd && str >= intel) return "WARRIOR";
+  if (spd >= str && spd >= intel) return "PHANTOM";
+  return "SAGE";
+}
+
+export default function AgentPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = use(params);
+  const { address } = useAccount();
+  const [editingPersonality, setEditingPersonality] = useState(false);
+  const [newPersonality, setNewPersonality] = useState("");
+  const [updateTxHash, setUpdateTxHash] = useState<`0x${string}` | null>(null);
+
+  const { data: agent, refetch } = useReadContract({
+    address: AGENT_NFT_ADDRESS,
+    abi: AGENT_NFT_ABI,
+    functionName: "getAgent",
+    args: [BigInt(id)],
+  }) as { data: Agent | undefined; refetch: () => void };
+
+  const { data: tokenURI } = useReadContract({
+    address: AGENT_NFT_ADDRESS,
+    abi: AGENT_NFT_ABI,
+    functionName: "tokenURI",
+    args: [BigInt(id)],
+  }) as { data: string | undefined };
+
+  const { writeContractAsync, isPending } = useWriteContract();
+  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({
+    hash: updateTxHash ?? undefined,
+  });
+
+  if (isSuccess && editingPersonality) {
+    setEditingPersonality(false);
+    setUpdateTxHash(null);
+    refetch();
+  }
+
+  const handleUpdatePersonality = async () => {
+    if (!newPersonality.trim()) return;
+    try {
+      const hash = await writeContractAsync({
+        address: AGENT_NFT_ADDRESS,
+        abi: AGENT_NFT_ABI,
+        functionName: "updatePersonality",
+        args: [BigInt(id), newPersonality.trim()],
+      });
+      setUpdateTxHash(hash);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  // Decode the onchain SVG from tokenURI
+  let svgDataUrl: string | null = null;
+  if (tokenURI && tokenURI.startsWith("data:application/json;base64,")) {
+    try {
+      const json = JSON.parse(atob(tokenURI.split(",")[1]));
+      svgDataUrl = json.image;
+    } catch {}
+  }
+
+  if (!agent) {
+    return (
+      <div className="max-w-2xl mx-auto py-16 text-center">
+        <div className="animate-pulse space-y-4">
+          <div className="h-8 bg-monad-border rounded w-1/2 mx-auto" />
+          <div className="h-96 bg-monad-card border border-monad-border rounded-lg" />
+        </div>
+      </div>
+    );
+  }
+
+  const isOwner = address?.toLowerCase() === agent.owner.toLowerCase();
+  const winRate =
+    Number(agent.wins) + Number(agent.losses) > 0
+      ? Math.round((Number(agent.wins) / (Number(agent.wins) + Number(agent.losses))) * 100)
+      : null;
+  const agentClass = getClass(agent.strength, agent.speed, agent.intelligence);
+
+  return (
+    <div className="max-w-2xl mx-auto space-y-6 py-8">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <Link href="/arena" className="text-sm text-gray-500 hover:text-monad-purple transition-colors">
+          ← Back to Arena
+        </Link>
+        <span className="text-xs text-gray-600">Token #{id} · Monad Testnet</span>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* NFT Card (onchain SVG) */}
+        <div>
+          <div className="text-xs text-gray-600 mb-2 text-center">Live onchain SVG — updates with every battle</div>
+          {svgDataUrl ? (
+            <img
+              src={svgDataUrl}
+              alt={agent.name}
+              className="w-full rounded-xl border border-monad-border glow-purple"
+            />
+          ) : (
+            <div className="aspect-[3/4] bg-monad-card border border-monad-border rounded-xl flex items-center justify-center text-gray-600">
+              Loading NFT...
+            </div>
+          )}
+        </div>
+
+        {/* Stats + Info */}
+        <div className="space-y-4">
+          <div>
+            <div className="flex items-center gap-3 mb-1">
+              <h1 className="text-2xl font-bold text-white">{agent.name}</h1>
+              {isOwner && (
+                <span className="text-xs px-2 py-0.5 bg-monad-purple/20 text-monad-purple border border-monad-purple/30 rounded">
+                  YOURS
+                </span>
+              )}
+            </div>
+            <div className="text-monad-purple text-sm font-bold">{agentClass}</div>
+          </div>
+
+          {/* Record */}
+          <div className="bg-monad-card border border-monad-border rounded-lg p-4">
+            <div className="text-xs text-gray-500 mb-2">BATTLE RECORD</div>
+            <div className="flex items-baseline gap-3">
+              <span className="text-3xl font-bold text-green-400">{agent.wins.toString()}W</span>
+              <span className="text-gray-600">-</span>
+              <span className="text-3xl font-bold text-red-400">{agent.losses.toString()}L</span>
+              {winRate !== null && (
+                <span className="text-sm text-monad-purple ml-2">{winRate}% win rate</span>
+              )}
+            </div>
+          </div>
+
+          {/* Stats */}
+          <div className="bg-monad-card border border-monad-border rounded-lg p-4 space-y-3">
+            <div className="text-xs text-gray-500 mb-1">STATS</div>
+            <StatRow label="STR" value={agent.strength} color="bg-red-500" />
+            <StatRow label="SPD" value={agent.speed} color="bg-yellow-400" />
+            <StatRow label="INT" value={agent.intelligence} color="bg-blue-400" />
+          </div>
+
+          {/* Personality */}
+          <div className="bg-monad-card border border-monad-border rounded-lg p-4">
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-xs text-gray-500">PERSONALITY</div>
+              {isOwner && !editingPersonality && (
+                <button
+                  onClick={() => {
+                    setNewPersonality(agent.personalityPrompt || "");
+                    setEditingPersonality(true);
+                  }}
+                  className="text-xs text-monad-purple hover:underline"
+                >
+                  Edit
+                </button>
+              )}
+            </div>
+            {editingPersonality ? (
+              <div className="space-y-2">
+                <textarea
+                  value={newPersonality}
+                  onChange={(e) => setNewPersonality(e.target.value.slice(0, 200))}
+                  rows={3}
+                  maxLength={200}
+                  className="w-full bg-monad-dark border border-monad-border focus:border-monad-purple rounded px-3 py-2 text-sm text-white outline-none resize-none"
+                />
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleUpdatePersonality}
+                    disabled={isPending || isConfirming}
+                    className="flex-1 py-1.5 bg-monad-purple hover:bg-monad-purple/80 disabled:bg-gray-700 text-white text-xs font-bold rounded"
+                  >
+                    {isPending ? "Confirm..." : isConfirming ? "Saving..." : "Save Onchain"}
+                  </button>
+                  <button
+                    onClick={() => setEditingPersonality(false)}
+                    className="px-3 py-1.5 border border-monad-border text-gray-400 text-xs rounded"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-monad-purple/80 italic">
+                {agent.personalityPrompt
+                  ? `"${agent.personalityPrompt}"`
+                  : <span className="text-gray-600 not-italic">No personality set yet.</span>}
+              </p>
+            )}
+          </div>
+
+          {/* Owner */}
+          <div className="text-xs text-gray-600">
+            Owner:{" "}
+            <a
+              href={`https://testnet.monadexplorer.com/address/${agent.owner}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-monad-purple hover:underline"
+            >
+              {agent.owner.slice(0, 6)}…{agent.owner.slice(-4)}
+            </a>
+            <span className="ml-2 text-gray-700">· Soulbound (non-transferable)</span>
+          </div>
+
+          {/* CTA */}
+          <Link
+            href="/arena"
+            className="block w-full py-3 bg-monad-purple hover:bg-monad-purple/80 text-white font-bold rounded-lg text-center transition-colors"
+          >
+            ⚔ Fight (stake {formatEther(BATTLE_STAKE)} MON)
+          </Link>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StatRow({ label, value, color }: { label: string; value: number; color: string }) {
+  return (
+    <div className="flex items-center gap-3">
+      <span className="text-xs text-gray-500 w-7">{label}</span>
+      <div className="flex-1 stat-bar">
+        <div className={`stat-bar-fill ${color}`} style={{ width: `${(value / 10) * 100}%` }} />
+      </div>
+      <span className="text-sm text-white w-3 text-right">{value}</span>
+    </div>
+  );
+}

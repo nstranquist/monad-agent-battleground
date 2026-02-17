@@ -11,60 +11,49 @@ async function main() {
     "MON"
   );
 
-  // Deploy AgentRegistry
-  console.log("\n[1/3] Deploying AgentRegistry...");
-  const AgentRegistry = await ethers.getContractFactory("AgentRegistry");
-  const registry = await AgentRegistry.deploy();
-  await registry.waitForDeployment();
-  const registryAddr = await registry.getAddress();
-  console.log("AgentRegistry deployed to:", registryAddr);
+  // 1. Deploy AgentNFT (soulbound dynamic NFT)
+  console.log("\n[1/3] Deploying AgentNFT...");
+  const AgentNFT = await ethers.getContractFactory("AgentNFT");
+  const nft = await AgentNFT.deploy();
+  await nft.waitForDeployment();
+  const nftAddr = await nft.getAddress();
+  console.log("AgentNFT deployed to:", nftAddr);
 
-  // Deploy BattleArena
+  // 2. Deploy BattleArena
   console.log("\n[2/3] Deploying BattleArena...");
   const BattleArena = await ethers.getContractFactory("BattleArena");
-  const arena = await BattleArena.deploy(registryAddr);
+  const arena = await BattleArena.deploy(nftAddr);
   await arena.waitForDeployment();
   const arenaAddr = await arena.getAddress();
   console.log("BattleArena deployed to:", arenaAddr);
 
-  // Link contracts
+  // 3. Link: tell AgentNFT who the BattleArena is
   console.log("\n[3/3] Linking contracts...");
-  const tx = await registry.setBattleArena(arenaAddr);
+  const tx = await nft.setBattleArena(arenaAddr);
   await tx.wait();
-  console.log("BattleArena linked to AgentRegistry");
+  console.log("BattleArena linked to AgentNFT");
 
-  // Write addresses to .env.local
+  // Update .env.local with deployed addresses
   const envPath = path.join(__dirname, "../.env.local");
-  let envContent = "";
-  if (fs.existsSync(envPath)) {
-    envContent = fs.readFileSync(envPath, "utf-8");
-  }
+  let envContent = fs.existsSync(envPath) ? fs.readFileSync(envPath, "utf-8") : "";
 
-  const updateEnv = (content: string, key: string, value: string): string => {
+  const setEnvVar = (content: string, key: string, value: string): string => {
     const regex = new RegExp(`^${key}=.*$`, "m");
-    if (regex.test(content)) {
-      return content.replace(regex, `${key}=${value}`);
-    }
-    return content + `\n${key}=${value}`;
+    return regex.test(content)
+      ? content.replace(regex, `${key}=${value}`)
+      : content + `\n${key}=${value}`;
   };
 
-  envContent = updateEnv(
-    envContent,
-    "NEXT_PUBLIC_AGENT_REGISTRY_ADDRESS",
-    registryAddr
-  );
-  envContent = updateEnv(
-    envContent,
-    "NEXT_PUBLIC_BATTLE_ARENA_ADDRESS",
-    arenaAddr
-  );
+  envContent = setEnvVar(envContent, "NEXT_PUBLIC_AGENT_NFT_ADDRESS", nftAddr);
+  envContent = setEnvVar(envContent, "NEXT_PUBLIC_BATTLE_ARENA_ADDRESS", arenaAddr);
+  // Keep backward compat key pointing to NFT contract
+  envContent = setEnvVar(envContent, "NEXT_PUBLIC_AGENT_REGISTRY_ADDRESS", nftAddr);
   fs.writeFileSync(envPath, envContent.trim() + "\n");
 
   console.log("\n✅ Deployment complete!");
-  console.log("   AgentRegistry:", registryAddr);
-  console.log("   BattleArena:  ", arenaAddr);
-  console.log("\n.env.local updated with contract addresses.");
-  console.log("Run `npm run dev` to start the frontend.");
+  console.log("   AgentNFT:    ", nftAddr);
+  console.log("   BattleArena: ", arenaAddr);
+  console.log("\n.env.local updated. Run `npm run dev` to start the frontend.");
 }
 
 main().catch((e) => {

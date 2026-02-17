@@ -12,15 +12,18 @@ const config: HardhatUserConfig = {
         enabled: true,
         runs: 200,
       },
+      viaIR: true,
     },
   },
   networks: {
     monad: {
       url: "https://testnet-rpc.monad.xyz",
       chainId: 10143,
-      accounts: process.env.DEPLOYER_PRIVATE_KEY
-        ? [process.env.DEPLOYER_PRIVATE_KEY]
-        : [],
+      accounts:
+        process.env.DEPLOYER_PRIVATE_KEY &&
+        process.env.DEPLOYER_PRIVATE_KEY.length === 64
+          ? [process.env.DEPLOYER_PRIVATE_KEY]
+          : [],
     },
   },
   paths: {

@@ -1,27 +1,45 @@
-export const AGENT_REGISTRY_ADDRESS = (process.env
-  .NEXT_PUBLIC_AGENT_REGISTRY_ADDRESS || "") as `0x${string}`;
+export const AGENT_NFT_ADDRESS = (process.env.NEXT_PUBLIC_AGENT_NFT_ADDRESS ||
+  process.env.NEXT_PUBLIC_AGENT_REGISTRY_ADDRESS ||
+  "") as `0x${string}`;
+
 export const BATTLE_ARENA_ADDRESS = (process.env
   .NEXT_PUBLIC_BATTLE_ARENA_ADDRESS || "") as `0x${string}`;
 
+// Backward-compat alias used by existing components
+export const AGENT_REGISTRY_ADDRESS = AGENT_NFT_ADDRESS;
+
 export const BATTLE_STAKE = BigInt("1000000000000000"); // 0.001 MON
 
-export const AGENT_REGISTRY_ABI = [
+// ─── AgentNFT ABI ─────────────────────────────────────────────────────────────
+
+export const AGENT_NFT_ABI = [
   {
     type: "function",
-    name: "createAgent",
+    name: "mint",
     inputs: [
       { name: "name", type: "string" },
       { name: "strength", type: "uint8" },
       { name: "speed", type: "uint8" },
       { name: "intelligence", type: "uint8" },
+      { name: "personalityPrompt", type: "string" },
     ],
-    outputs: [{ name: "agentId", type: "uint256" }],
+    outputs: [{ name: "tokenId", type: "uint256" }],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    name: "updatePersonality",
+    inputs: [
+      { name: "tokenId", type: "uint256" },
+      { name: "prompt", type: "string" },
+    ],
+    outputs: [],
     stateMutability: "nonpayable",
   },
   {
     type: "function",
     name: "getAgent",
-    inputs: [{ name: "agentId", type: "uint256" }],
+    inputs: [{ name: "tokenId", type: "uint256" }],
     outputs: [
       {
         name: "",
@@ -33,6 +51,7 @@ export const AGENT_REGISTRY_ABI = [
           { name: "strength", type: "uint8" },
           { name: "speed", type: "uint8" },
           { name: "intelligence", type: "uint8" },
+          { name: "personalityPrompt", type: "string" },
           { name: "wins", type: "uint256" },
           { name: "losses", type: "uint256" },
           { name: "createdAt", type: "uint256" },
@@ -58,6 +77,13 @@ export const AGENT_REGISTRY_ABI = [
   },
   {
     type: "function",
+    name: "tokenURI",
+    inputs: [{ name: "tokenId", type: "uint256" }],
+    outputs: [{ name: "", type: "string" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
     name: "totalAgents",
     inputs: [],
     outputs: [{ name: "", type: "uint256" }],
@@ -65,9 +91,9 @@ export const AGENT_REGISTRY_ABI = [
   },
   {
     type: "event",
-    name: "AgentCreated",
+    name: "AgentMinted",
     inputs: [
-      { name: "agentId", type: "uint256", indexed: true },
+      { name: "tokenId", type: "uint256", indexed: true },
       { name: "owner", type: "address", indexed: true },
       { name: "name", type: "string", indexed: false },
       { name: "str", type: "uint8", indexed: false },
@@ -75,7 +101,20 @@ export const AGENT_REGISTRY_ABI = [
       { name: "intel", type: "uint8", indexed: false },
     ],
   },
+  {
+    type: "event",
+    name: "PersonalityUpdated",
+    inputs: [
+      { name: "tokenId", type: "uint256", indexed: true },
+      { name: "prompt", type: "string", indexed: false },
+    ],
+  },
 ] as const;
+
+// Backward-compat alias
+export const AGENT_REGISTRY_ABI = AGENT_NFT_ABI;
+
+// ─── BattleArena ABI ──────────────────────────────────────────────────────────
 
 export const BATTLE_ARENA_ABI = [
   {

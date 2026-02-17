@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import "./AgentRegistry.sol";
+import "./AgentNFT.sol";
 
 /// @title BattleArena
-/// @notice Stake MON, challenge agents, resolve battles onchain
+/// @notice Stake MON, challenge agents, resolve battles onchain in one transaction.
 contract BattleArena {
-    AgentRegistry public immutable registry;
+    AgentNFT public immutable nft;
 
-    uint256 public constant BATTLE_STAKE = 0.001 ether; // 0.001 MON per side
-    uint256 public constant PROTOCOL_FEE_BPS = 500;     // 5%
+    uint256 public constant BATTLE_STAKE = 0.001 ether;
+    uint256 public constant PROTOCOL_FEE_BPS = 500; // 5%
 
     enum BattleStatus { Pending, Completed, Cancelled }
 
@@ -19,9 +19,9 @@ contract BattleArena {
         uint256 challengedAgentId;
         address challenger;
         address challenged;
-        uint256 stake;            // per side
+        uint256 stake;
         BattleStatus status;
-        uint256 winnerAgentId;    // 0 = not resolved
+        uint256 winnerAgentId;
         uint256 createdAt;
         uint256 resolvedAt;
     }
@@ -47,22 +47,18 @@ contract BattleArena {
     );
     event BattleCancelled(uint256 indexed battleId);
 
-    constructor(address _registry) {
-        registry = AgentRegistry(_registry);
+    constructor(address _nft) {
+        nft = AgentNFT(_nft);
         owner = msg.sender;
     }
 
     /// @notice Challenge another agent to a staked battle
     function challenge(uint256 myAgentId, uint256 opponentAgentId)
-        external
-        payable
-        returns (uint256 battleId)
+        external payable returns (uint256 battleId)
     {
         require(msg.value == BATTLE_STAKE, "Must stake exact amount");
-
-        AgentRegistry.Agent memory myAgent = registry.getAgent(myAgentId);
-        AgentRegistry.Agent memory opAgent = registry.getAgent(opponentAgentId);
-
+        AgentNFT.Agent memory myAgent = nft.getAgent(myAgentId);
+        AgentNFT.Agent memory opAgent = nft.getAgent(opponentAgentId);
         require(myAgent.owner == msg.sender, "Not your agent");
         require(opAgent.exists, "Opponent not found");
         require(myAgentId != opponentAgentId, "Cannot fight yourself");
@@ -81,29 +77,25 @@ contract BattleArena {
             resolvedAt: 0
         });
         _allBattleIds.push(battleId);
-
         emit BattleCreated(battleId, myAgentId, opponentAgentId, msg.sender, opAgent.owner);
     }
 
-    /// @notice Accept a pending challenge and resolve battle instantly
+    /// @notice Accept a pending challenge — battle resolves atomically in this tx
     function acceptChallenge(uint256 battleId) external payable {
         Battle storage battle = battles[battleId];
         require(battle.status == BattleStatus.Pending, "Not pending");
         require(msg.value == battle.stake, "Must match stake");
-
-        AgentRegistry.Agent memory myAgent = registry.getAgent(battle.challengedAgentId);
+        AgentNFT.Agent memory myAgent = nft.getAgent(battle.challengedAgentId);
         require(myAgent.owner == msg.sender, "Not your agent");
-
         _resolveBattle(battleId);
     }
 
-    /// @notice Cancel an unaccepted challenge and recover stake (after 1h)
+    /// @notice Cancel unaccepted challenge after 1 hour
     function cancelChallenge(uint256 battleId) external {
         Battle storage battle = battles[battleId];
         require(battle.status == BattleStatus.Pending, "Not pending");
         require(battle.challenger == msg.sender, "Not challenger");
         require(block.timestamp >= battle.createdAt + 1 hours, "Wait 1 hour");
-
         battle.status = BattleStatus.Cancelled;
         payable(battle.challenger).transfer(battle.stake);
         emit BattleCancelled(battleId);
@@ -111,64 +103,51 @@ contract BattleArena {
 
     function _resolveBattle(uint256 battleId) internal {
         Battle storage battle = battles[battleId];
+        AgentNFT.Agent memory agentA = nft.getAgent(battle.challengerAgentId);
+        AgentNFT.Agent memory agentB = nft.getAgent(battle.challengedAgentId);
 
-        AgentRegistry.Agent memory agentA = registry.getAgent(battle.challengerAgentId);
-        AgentRegistry.Agent memory agentB = registry.getAgent(battle.challengedAgentId);
-
-        // Pseudo-random seed: blockhash + battle params
-        bytes32 seed = keccak256(
-            abi.encodePacked(
-                blockhash(block.number - 1),
-                battleId,
-                battle.challengerAgentId,
-                battle.challengedAgentId,
-                block.timestamp
-            )
-        );
+        bytes32 seed = keccak256(abi.encodePacked(
+            blockhash(block.number - 1),
+            battleId,
+            battle.challengerAgentId,
+            battle.challengedAgentId,
+            block.timestamp
+        ));
 
         uint256 scoreA = _calcScore(agentA, uint256(seed));
         uint256 scoreB = _calcScore(agentB, uint256(seed) >> 128);
 
         bool challengerWins = scoreA >= scoreB;
         uint256 winnerAgentId = challengerWins ? battle.challengerAgentId : battle.challengedAgentId;
-        address winner = challengerWins ? battle.challenger : battle.challenged;
+        uint256 loserAgentId  = challengerWins ? battle.challengedAgentId : battle.challengerAgentId;
+        address winner        = challengerWins ? battle.challenger : battle.challenged;
 
-        // Update records
-        uint256 loserAgentId = challengerWins ? battle.challengedAgentId : battle.challengerAgentId;
-        registry.recordBattleResult(winnerAgentId, loserAgentId);
+        // Update NFT W/L — tokenURI SVG reflects new record immediately
+        nft.recordBattleResult(winnerAgentId, loserAgentId);
 
-        // Distribute prize
-        uint256 pot = battle.stake * 2;
-        uint256 fee = (pot * PROTOCOL_FEE_BPS) / 10000;
-        uint256 payout = pot - fee;
-        protocolFees += fee;
+        uint256 pot     = battle.stake * 2;
+        uint256 fee     = (pot * PROTOCOL_FEE_BPS) / 10000;
+        uint256 payout  = pot - fee;
+        protocolFees   += fee;
 
         battle.winnerAgentId = winnerAgentId;
-        battle.status = BattleStatus.Completed;
-        battle.resolvedAt = block.timestamp;
+        battle.status        = BattleStatus.Completed;
+        battle.resolvedAt    = block.timestamp;
 
         payable(winner).transfer(payout);
-
         emit BattleResolved(battleId, winnerAgentId, winner, payout);
     }
 
-    /// @dev Each stat is weighted by a random multiplier (1-10)
-    function _calcScore(AgentRegistry.Agent memory agent, uint256 seed)
-        internal
-        pure
-        returns (uint256)
+    function _calcScore(AgentNFT.Agent memory agent, uint256 seed)
+        internal pure returns (uint256)
     {
         uint256 strMul = (seed % 10) + 1;
         uint256 spdMul = ((seed >> 32) % 10) + 1;
         uint256 intMul = ((seed >> 64) % 10) + 1;
-
-        return
-            uint256(agent.strength) * strMul +
-            uint256(agent.speed) * spdMul +
-            uint256(agent.intelligence) * intMul;
+        return uint256(agent.strength) * strMul
+             + uint256(agent.speed)    * spdMul
+             + uint256(agent.intelligence) * intMul;
     }
-
-    // --- Views ---
 
     function getBattle(uint256 battleId) external view returns (Battle memory) {
         return battles[battleId];
@@ -181,8 +160,6 @@ contract BattleArena {
     function totalBattles() external view returns (uint256) {
         return _allBattleIds.length;
     }
-
-    // --- Admin ---
 
     function withdrawFees() external {
         require(msg.sender == owner, "Not owner");
