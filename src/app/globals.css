@@ -1,0 +1,44 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #0a0a0f;
+  --foreground: #ffffff;
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #13131a;
+}
+::-webkit-scrollbar-thumb {
+  background: #836ef9;
+  border-radius: 3px;
+}
+
+/* Stat bar */
+.stat-bar {
+  @apply h-2 rounded-full bg-monad-border overflow-hidden;
+}
+.stat-bar-fill {
+  @apply h-full rounded-full transition-all duration-500;
+}
+
+/* Glow effect */
+.glow-purple {
+  box-shadow: 0 0 20px rgba(131, 110, 249, 0.4);
+}
+
+/* Battle narrative text */
+.narrative-text {
+  line-height: 1.8;
+  color: #c8c0ff;
+}
