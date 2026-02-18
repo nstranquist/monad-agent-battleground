@@ -1,12 +1,12 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useAccount, useReadContract, useWriteContract, useWaitForTransactionReceipt } from "wagmi";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { formatEther } from "viem";
 import {
-  AGENT_REGISTRY_ADDRESS,
-  AGENT_REGISTRY_ABI,
+  AGENT_NFT_ADDRESS,
+  AGENT_NFT_ABI,
   BATTLE_ARENA_ADDRESS,
   BATTLE_ARENA_ABI,
   BATTLE_STAKE,
@@ -14,7 +14,7 @@ import {
 import { AgentCard } from "@/components/AgentCard";
 import { Agent, Battle } from "@/lib/types";
 
-type Step = "select-my-agent" | "select-opponent" | "battle-result";
+type Step = "select-my-agent" | "select-opponent" | "battling" | "battle-result";
 
 export default function ArenaPage() {
   const { address, isConnected } = useAccount();
@@ -26,6 +26,8 @@ export default function ArenaPage() {
   const [narrativeLoading, setNarrativeLoading] = useState(false);
   const [pendingBattleId, setPendingBattleId] = useState<bigint | null>(null);
   const [txHash, setTxHash] = useState<`0x${string}` | null>(null);
+  const [resolvedBattleId, setResolvedBattleId] = useState<bigint | null>(null);
+  const [clashPhase, setClashPhase] = useState<"idle" | "charging" | "clash" | "done">("idle");
 
   const { writeContractAsync, isPending } = useWriteContract();
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({
@@ -33,16 +35,16 @@ export default function ArenaPage() {
   });
 
   // Load all agent IDs
-  const { data: allAgentIds, refetch: refetchAgents } = useReadContract({
-    address: AGENT_REGISTRY_ADDRESS,
-    abi: AGENT_REGISTRY_ABI,
+  const { data: allAgentIds } = useReadContract({
+    address: AGENT_NFT_ADDRESS,
+    abi: AGENT_NFT_ABI,
     functionName: "getAllAgentIds",
   });
 
   // Load my agent IDs
   const { data: myAgentIds } = useReadContract({
-    address: AGENT_REGISTRY_ADDRESS,
-    abi: AGENT_REGISTRY_ABI,
+    address: AGENT_NFT_ADDRESS,
+    abi: AGENT_NFT_ABI,
     functionName: "getOwnerAgents",
     args: address ? [address] : undefined,
     query: { enabled: !!address },
@@ -55,6 +57,45 @@ export default function ArenaPage() {
     functionName: "getAllBattleIds",
   });
 
+  // Fetch narrative after battle confirmed
+  const fetchNarrative = useCallback(async (bid: bigint) => {
+    setNarrativeLoading(true);
+    try {
+      const res = await fetch("/api/narrative", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ battleId: bid.toString() }),
+      });
+      const data = await res.json();
+      setNarrative(data.narrative);
+    } catch {
+      setNarrative("The battle was too intense to put into words...");
+    } finally {
+      setNarrativeLoading(false);
+    }
+  }, []);
+
+  // When battle tx confirms, run clash animation then fetch narrative
+  useEffect(() => {
+    if (!isSuccess || !txHash) return;
+    const bid = pendingBattleId ?? battleId;
+    if (!bid) return;
+
+    setResolvedBattleId(bid);
+    setStep("battling");
+    setClashPhase("charging");
+
+    // Clash animation sequence
+    const t1 = setTimeout(() => setClashPhase("clash"), 800);
+    const t2 = setTimeout(() => {
+      setClashPhase("done");
+      setStep("battle-result");
+      fetchNarrative(bid);
+    }, 1800);
+
+    return () => { clearTimeout(t1); clearTimeout(t2); };
+  }, [isSuccess]);
+
   const handleChallenge = async () => {
     if (!myAgentId || !opponentAgentId) return;
     try {
@@ -66,6 +107,7 @@ export default function ArenaPage() {
         value: BATTLE_STAKE,
       });
       setTxHash(hash);
+      setBattleId(null); // will be resolved from contract
     } catch (e) {
       console.error(e);
     }
@@ -87,27 +129,6 @@ export default function ArenaPage() {
     }
   };
 
-  // Once tx confirmed, fetch narrative
-  const fetchNarrative = useCallback(
-    async (bid: bigint) => {
-      setNarrativeLoading(true);
-      try {
-        const res = await fetch("/api/narrative", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ battleId: bid.toString() }),
-        });
-        const data = await res.json();
-        setNarrative(data.narrative);
-      } catch (e) {
-        setNarrative("The battle was too intense to describe...");
-      } finally {
-        setNarrativeLoading(false);
-      }
-    },
-    []
-  );
-
   if (!isConnected) {
     return (
       <div className="text-center py-24 space-y-4">
@@ -116,6 +137,38 @@ export default function ArenaPage() {
         <p className="text-gray-400 mb-6">Connect your wallet to battle.</p>
         <ConnectButton />
       </div>
+    );
+  }
+
+  // Clash animation screen
+  if (step === "battling") {
+    return (
+      <ClashScreen
+        myAgentId={myAgentId ?? opponentAgentId}
+        opponentAgentId={opponentAgentId ?? myAgentId}
+        phase={clashPhase}
+      />
+    );
+  }
+
+  // Battle result screen
+  if (step === "battle-result" && resolvedBattleId !== null) {
+    return (
+      <BattleResultScreen
+        battleId={resolvedBattleId}
+        narrative={narrative}
+        narrativeLoading={narrativeLoading}
+        onReset={() => {
+          setStep("select-my-agent");
+          setMyAgentId(null);
+          setOpponentAgentId(null);
+          setBattleId(null);
+          setNarrative(null);
+          setTxHash(null);
+          setPendingBattleId(null);
+          setResolvedBattleId(null);
+        }}
+      />
     );
   }
 
@@ -134,33 +187,25 @@ export default function ArenaPage() {
 
       {/* Step indicator */}
       <div className="flex items-center gap-2 text-sm">
-        {["select-my-agent", "select-opponent", "battle-result"].map(
-          (s, i) => (
-            <div key={s} className="flex items-center gap-2">
-              <div
-                className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
-                  step === s
-                    ? "bg-monad-purple text-white"
-                    : i < ["select-my-agent", "select-opponent", "battle-result"].indexOf(step)
-                    ? "bg-green-500 text-white"
-                    : "bg-monad-border text-gray-400"
-                }`}
-              >
-                {i + 1}
-              </div>
-              <span
-                className={step === s ? "text-white" : "text-gray-500"}
-              >
-                {s === "select-my-agent"
-                  ? "Your Agent"
-                  : s === "select-opponent"
-                  ? "Opponent"
-                  : "Fight!"}
-              </span>
-              {i < 2 && <span className="text-gray-600">→</span>}
+        {(["select-my-agent", "select-opponent"] as const).map((s, i) => (
+          <div key={s} className="flex items-center gap-2">
+            <div
+              className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
+                step === s
+                  ? "bg-monad-purple text-white"
+                  : i === 0 && step === "select-opponent"
+                  ? "bg-green-500 text-white"
+                  : "bg-monad-border text-gray-400"
+              }`}
+            >
+              {i + 1}
             </div>
-          )
-        )}
+            <span className={step === s ? "text-white" : "text-gray-500"}>
+              {s === "select-my-agent" ? "Your Agent" : "Opponent"}
+            </span>
+            {i < 1 && <span className="text-gray-600">→</span>}
+          </div>
+        ))}
       </div>
 
       {/* Step 1: Select my agent */}
@@ -189,7 +234,7 @@ export default function ArenaPage() {
         </AgentSelector>
       )}
 
-      {/* Step 2: Select opponent */}
+      {/* Step 2: Select opponent + fight */}
       {step === "select-opponent" && (
         <AgentSelector
           title="Choose Your Opponent"
@@ -215,14 +260,14 @@ export default function ArenaPage() {
               {isPending
                 ? "Confirm in wallet..."
                 : isConfirming
-                ? "⏳ Battle happening..."
+                ? "⏳ On-chain battle..."
                 : `⚔ FIGHT! (stake ${formatEther(BATTLE_STAKE)} MON)`}
             </button>
           </div>
         </AgentSelector>
       )}
 
-      {/* Pending Challenges Section */}
+      {/* Pending Challenges */}
       <PendingChallenges
         address={address}
         myAgentIds={myAgentIds as bigint[] | undefined}
@@ -234,6 +279,210 @@ export default function ArenaPage() {
     </div>
   );
 }
+
+// ── Clash animation screen ────────────────────────────────────────────────────
+
+function ClashScreen({
+  myAgentId,
+  opponentAgentId,
+  phase,
+}: {
+  myAgentId: bigint | null;
+  opponentAgentId: bigint | null;
+  phase: "idle" | "charging" | "clash" | "done";
+}) {
+  const { data: myAgent } = useReadContract({
+    address: AGENT_NFT_ADDRESS,
+    abi: AGENT_NFT_ABI,
+    functionName: "getAgent",
+    args: myAgentId ? [myAgentId] : undefined,
+    query: { enabled: !!myAgentId },
+  }) as { data: Agent | undefined };
+
+  const { data: oppAgent } = useReadContract({
+    address: AGENT_NFT_ADDRESS,
+    abi: AGENT_NFT_ABI,
+    functionName: "getAgent",
+    args: opponentAgentId ? [opponentAgentId] : undefined,
+    query: { enabled: !!opponentAgentId },
+  }) as { data: Agent | undefined };
+
+  return (
+    <div className="flex flex-col items-center justify-center min-h-[60vh] space-y-8">
+      <h2 className="text-2xl font-bold text-monad-purple animate-pulse">
+        Battle in progress...
+      </h2>
+
+      <div className="flex items-center gap-8 w-full max-w-lg">
+        {/* My fighter */}
+        <div
+          className={`flex-1 text-center transition-all duration-700 ${
+            phase === "charging" ? "battle-slide-left" :
+            phase === "clash" ? "battle-shake" : ""
+          }`}
+        >
+          <div className="text-5xl mb-2">🤖</div>
+          <div className="font-bold text-white">{myAgent?.name ?? "..."}</div>
+          <div className="text-xs text-monad-purple mt-1">
+            {myAgent ? `${myAgent.strength}/${myAgent.speed}/${myAgent.intelligence}` : ""}
+          </div>
+        </div>
+
+        {/* Clash effect */}
+        <div className="relative w-16 flex-shrink-0 flex items-center justify-center">
+          {phase === "clash" && (
+            <div className="text-4xl battle-flash">⚡</div>
+          )}
+          {phase !== "clash" && (
+            <div className="text-2xl text-gray-600">⚔</div>
+          )}
+        </div>
+
+        {/* Opponent */}
+        <div
+          className={`flex-1 text-center transition-all duration-700 ${
+            phase === "charging" ? "battle-slide-right" :
+            phase === "clash" ? "battle-shake" : ""
+          }`}
+        >
+          <div className="text-5xl mb-2">🤖</div>
+          <div className="font-bold text-white">{oppAgent?.name ?? "..."}</div>
+          <div className="text-xs text-monad-purple mt-1">
+            {oppAgent ? `${oppAgent.strength}/${oppAgent.speed}/${oppAgent.intelligence}` : ""}
+          </div>
+        </div>
+      </div>
+
+      <p className="text-sm text-gray-500 animate-pulse">
+        Resolving on Monad...
+      </p>
+    </div>
+  );
+}
+
+// ── Battle result screen ──────────────────────────────────────────────────────
+
+function BattleResultScreen({
+  battleId,
+  narrative,
+  narrativeLoading,
+  onReset,
+}: {
+  battleId: bigint;
+  narrative: string | null;
+  narrativeLoading: boolean;
+  onReset: () => void;
+}) {
+  const { data: battle } = useReadContract({
+    address: BATTLE_ARENA_ADDRESS,
+    abi: BATTLE_ARENA_ABI,
+    functionName: "getBattle",
+    args: [battleId],
+  }) as { data: Battle | undefined };
+
+  const { data: winnerAgent } = useReadContract({
+    address: AGENT_NFT_ADDRESS,
+    abi: AGENT_NFT_ABI,
+    functionName: "getAgent",
+    args: battle?.winnerAgentId ? [battle.winnerAgentId] : undefined,
+    query: { enabled: !!battle?.winnerAgentId },
+  }) as { data: Agent | undefined };
+
+  const { data: challengerAgent } = useReadContract({
+    address: AGENT_NFT_ADDRESS,
+    abi: AGENT_NFT_ABI,
+    functionName: "getAgent",
+    args: battle?.challengerAgentId ? [battle.challengerAgentId] : undefined,
+    query: { enabled: !!battle },
+  }) as { data: Agent | undefined };
+
+  const { data: challengedAgent } = useReadContract({
+    address: AGENT_NFT_ADDRESS,
+    abi: AGENT_NFT_ABI,
+    functionName: "getAgent",
+    args: battle?.challengedAgentId ? [battle.challengedAgentId] : undefined,
+    query: { enabled: !!battle },
+  }) as { data: Agent | undefined };
+
+  const loserAgent =
+    battle && winnerAgent
+      ? battle.winnerAgentId === battle.challengerAgentId
+        ? challengedAgent
+        : challengerAgent
+      : undefined;
+
+  return (
+    <div className="max-w-2xl mx-auto space-y-6 py-8 fade-in-up">
+      {/* Winner banner */}
+      {winnerAgent ? (
+        <div className="text-center space-y-2">
+          <div className="text-5xl">🏆</div>
+          <h2 className="text-3xl font-bold text-monad-purple">
+            {winnerAgent.name} wins!
+          </h2>
+          {loserAgent && (
+            <p className="text-gray-400 text-sm">
+              defeated <span className="text-white">{loserAgent.name}</span>
+            </p>
+          )}
+          <p className="text-gray-500 text-xs">
+            Payout: {formatEther(BATTLE_STAKE * 2n)} MON · Battle #{battleId.toString()}
+          </p>
+        </div>
+      ) : (
+        <div className="text-center">
+          <div className="text-3xl font-bold">Battle #{battleId.toString()} resolved</div>
+        </div>
+      )}
+
+      {/* Fighter cards */}
+      {challengerAgent && challengedAgent && (
+        <div className="grid grid-cols-2 gap-4">
+          <div className={winnerAgent?.id === challengerAgent.id ? "opacity-100" : "opacity-40"}>
+            <AgentCard agent={challengerAgent as Agent} />
+          </div>
+          <div className={winnerAgent?.id === challengedAgent.id ? "opacity-100" : "opacity-40"}>
+            <AgentCard agent={challengedAgent as Agent} />
+          </div>
+        </div>
+      )}
+
+      {/* Narrative */}
+      <div className="bg-monad-card border border-monad-border rounded-lg p-5">
+        <div className="text-sm font-bold text-monad-purple mb-3">Battle Narrative</div>
+        {narrativeLoading ? (
+          <div className="space-y-2 animate-pulse">
+            <div className="h-3 bg-monad-border rounded w-full" />
+            <div className="h-3 bg-monad-border rounded w-5/6" />
+            <div className="h-3 bg-monad-border rounded w-4/5" />
+            <div className="h-3 bg-monad-border rounded w-full" />
+          </div>
+        ) : narrative ? (
+          <p className="narrative-text text-sm text-reveal">{narrative}</p>
+        ) : (
+          <p className="text-gray-500 text-sm italic">Narrative unavailable.</p>
+        )}
+      </div>
+
+      <div className="flex gap-3">
+        <button
+          onClick={onReset}
+          className="flex-1 py-3 bg-monad-purple hover:bg-monad-purple/80 text-white font-bold rounded-lg"
+        >
+          Fight Again →
+        </button>
+        <a
+          href="/leaderboard"
+          className="flex-1 py-3 border border-monad-border hover:border-monad-purple text-gray-300 font-bold rounded-lg text-center"
+        >
+          Leaderboard
+        </a>
+      </div>
+    </div>
+  );
+}
+
+// ── Agent selector ────────────────────────────────────────────────────────────
 
 function AgentSelector({
   title,
@@ -278,18 +527,14 @@ function AgentCardLoader({
   agentId,
   selected,
   onClick,
-  showChallenge,
-  onChallenge,
 }: {
   agentId: bigint;
   selected?: boolean;
   onClick?: () => void;
-  showChallenge?: boolean;
-  onChallenge?: () => void;
 }) {
   const { data: agent } = useReadContract({
-    address: AGENT_REGISTRY_ADDRESS,
-    abi: AGENT_REGISTRY_ABI,
+    address: AGENT_NFT_ADDRESS,
+    abi: AGENT_NFT_ABI,
     functionName: "getAgent",
     args: [agentId],
   });
@@ -308,11 +553,11 @@ function AgentCardLoader({
       agent={agent as Agent}
       selected={selected}
       onClick={onClick}
-      showChallenge={showChallenge}
-      onChallenge={onChallenge}
     />
   );
 }
+
+// ── Pending challenges ────────────────────────────────────────────────────────
 
 function PendingChallenges({
   address,
@@ -371,16 +616,16 @@ function BattleRow({
   }) as { data: Battle | undefined };
 
   const { data: challengerAgent } = useReadContract({
-    address: AGENT_REGISTRY_ADDRESS,
-    abi: AGENT_REGISTRY_ABI,
+    address: AGENT_NFT_ADDRESS,
+    abi: AGENT_NFT_ABI,
     functionName: "getAgent",
     args: battle ? [battle.challengerAgentId] : undefined,
     query: { enabled: !!battle },
   });
 
   const { data: challengedAgent } = useReadContract({
-    address: AGENT_REGISTRY_ADDRESS,
-    abi: AGENT_REGISTRY_ABI,
+    address: AGENT_NFT_ADDRESS,
+    abi: AGENT_NFT_ABI,
     functionName: "getAgent",
     args: battle ? [battle.challengedAgentId] : undefined,
     query: { enabled: !!battle },
@@ -389,9 +634,7 @@ function BattleRow({
   if (!battle || !challengerAgent || !challengedAgent) return null;
 
   const isMyChallengedAgent = myAgentIds?.includes(battle.challengedAgentId);
-  const statusLabel = ["Pending ⏳", "Completed ✅", "Cancelled ❌"][
-    battle.status
-  ];
+  const statusLabel = ["Pending ⏳", "Completed ✅", "Cancelled ❌"][battle.status];
   const winnerName =
     battle.status === 1 && battle.winnerAgentId
       ? battle.winnerAgentId === battle.challengerAgentId
@@ -406,13 +649,9 @@ function BattleRow({
           #{battleId.toString()}
         </span>
         <div className="flex items-center gap-2 flex-1 min-w-0 text-sm">
-          <span className="text-white truncate">
-            {(challengerAgent as Agent).name}
-          </span>
+          <span className="text-white truncate">{(challengerAgent as Agent).name}</span>
           <span className="text-gray-500">vs</span>
-          <span className="text-white truncate">
-            {(challengedAgent as Agent).name}
-          </span>
+          <span className="text-white truncate">{(challengedAgent as Agent).name}</span>
         </div>
       </div>
       <div className="flex items-center gap-3">
@@ -421,9 +660,7 @@ function BattleRow({
             🏆 {winnerName}
           </span>
         )}
-        <span className="text-xs text-gray-500 whitespace-nowrap">
-          {statusLabel}
-        </span>
+        <span className="text-xs text-gray-500 whitespace-nowrap">{statusLabel}</span>
         {battle.status === 0 && isMyChallengedAgent && (
           <button
             onClick={() => onAccept(battleId)}

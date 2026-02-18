@@ -42,3 +42,39 @@ body {
   line-height: 1.8;
   color: #c8c0ff;
 }
+
+/* Battle animation */
+@keyframes slide-in-left {
+  from { transform: translateX(-80px); opacity: 0; }
+  to   { transform: translateX(0);     opacity: 1; }
+}
+@keyframes slide-in-right {
+  from { transform: translateX(80px);  opacity: 0; }
+  to   { transform: translateX(0);     opacity: 1; }
+}
+@keyframes clash-shake {
+  0%, 100% { transform: translateX(0); }
+  20%       { transform: translateX(-6px); }
+  40%       { transform: translateX(6px); }
+  60%       { transform: translateX(-4px); }
+  80%       { transform: translateX(4px); }
+}
+@keyframes clash-flash {
+  0%, 100% { opacity: 0; }
+  50%       { opacity: 1; }
+}
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes text-reveal {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.battle-slide-left  { animation: slide-in-left  0.4s ease-out forwards; }
+.battle-slide-right { animation: slide-in-right 0.4s ease-out forwards; }
+.battle-shake       { animation: clash-shake    0.5s ease-in-out; }
+.battle-flash       { animation: clash-flash    0.3s ease-in-out 2; }
+.fade-in-up         { animation: fade-in-up     0.5s ease-out forwards; }
+.text-reveal        { animation: text-reveal    1s ease-out forwards; }

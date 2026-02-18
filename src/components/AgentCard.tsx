@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { Agent } from "@/lib/types";
 
 const STAT_COLORS = {
@@ -82,11 +83,18 @@ export function AgentCard({
           </div>
           <div className="text-xs text-monad-purple mt-0.5">{agentClass}</div>
         </div>
-        <div className="text-right">
+        <div className="text-right flex flex-col items-end gap-1">
           <div className="text-xs text-gray-500">#{agent.id.toString()}</div>
           {winRate !== null && (
             <div className="text-xs text-green-400">{winRate}% WR</div>
           )}
+          <Link
+            href={`/agent/${agent.id.toString()}`}
+            onClick={(e) => e.stopPropagation()}
+            className="text-xs text-monad-purple/60 hover:text-monad-purple underline leading-none"
+          >
+            view →
+          </Link>
         </div>
       </div>
 
