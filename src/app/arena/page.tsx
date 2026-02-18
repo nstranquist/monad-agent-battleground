@@ -8,6 +8,7 @@ import { formatEther } from "viem";
 import { useContracts } from "@/hooks/useContracts";
 import { AgentCard } from "@/components/AgentCard";
 import { Agent, Battle } from "@/lib/types";
+import { TEST_ADDRESSES } from "@/lib/constants";
 import type { BattlePhase } from "@/components/BattleArena3D";
 
 const QUERY_CONFIG = {
@@ -45,18 +46,6 @@ const TRAINER_BOT: Agent = {
   exists: true,
 };
 
-// Agents owned by these addresses are hidden from the opponent picker
-// (simulation / deployer test wallets that pollute the UI for real users)
-const TEST_ADDRESSES = new Set([
-  "0x87c1a9281abcb1b894792b49b4ff7b95de667201", // deployer / Rabby 1
-  "0xff6e8bb3190e1a76445db702aa522b3eedf5022e", // Rabby 2
-  "0x2fb62cfa3c06074c145f6c40bab3dfda1d9b20cf", // backup
-  "0xe1d58146bb59aba159588cdc4026ebb52bf516b6", // test1
-  "0xae960fa5229db90daf10d5e0fb7ae69292d40fc5", // test2
-  "0x0418dc095eed888d2370fe2b0018bcf54615697e", // test3
-  "0xd2097f2bd5031c8275ce33b7f5f0a6d9a44562a6", // test4
-  "0x5b85e9debfa4e3b568ff4cbd55f0d9bb8a4fc61f", // test5
-]);
 
 function resolveTrainingBattle(player: Agent): boolean {
   const seed = Date.now();
@@ -95,6 +84,7 @@ export default function ArenaPage() {
   const [opponentAgentId, setOpponentAgentId] = useState<bigint | null>(null);
   const [battleId, setBattleId] = useState<bigint | null>(null);
   const [narrative, setNarrative] = useState<string | null>(null);
+  const [narrativeTxHash, setNarrativeTxHash] = useState<string | null>(null);
   const [narrativeLoading, setNarrativeLoading] = useState(false);
   const [pendingBattleId, setPendingBattleId] = useState<bigint | null>(null);
   const [txHash, setTxHash] = useState<`0x${string}` | null>(null);
@@ -143,6 +133,7 @@ export default function ArenaPage() {
       });
       const data = await res.json();
       setNarrative(data.narrative);
+      if (data.narrativeTxHash) setNarrativeTxHash(data.narrativeTxHash);
     } catch {
       setNarrative("The battle was too intense to put into words...");
     } finally {
@@ -250,12 +241,14 @@ export default function ArenaPage() {
         battleId={resolvedBattleId}
         narrative={narrative}
         narrativeLoading={narrativeLoading}
+        narrativeTxHash={narrativeTxHash}
         onReset={() => {
           setStep("select-my-agent");
           setMyAgentId(null);
           setOpponentAgentId(null);
           setBattleId(null);
           setNarrative(null);
+          setNarrativeTxHash(null);
           setTxHash(null);
           setPendingBattleId(null);
           setResolvedBattleId(null);
@@ -455,14 +448,16 @@ function BattleResultScreen({
   battleId,
   narrative,
   narrativeLoading,
+  narrativeTxHash,
   onReset,
 }: {
   battleId: bigint;
   narrative: string | null;
   narrativeLoading: boolean;
+  narrativeTxHash: string | null;
   onReset: () => void;
 }) {
-  const { agentNftAddress, agentNftAbi, battleArenaAddress, battleArenaAbi, battleStake } = useContracts();
+  const { agentNftAddress, agentNftAbi, battleArenaAddress, battleArenaAbi, battleStake, explorerUrl } = useContracts();
   const { data: battle } = useReadContract({
     address: battleArenaAddress,
     abi: battleArenaAbi,
@@ -540,7 +535,24 @@ function BattleResultScreen({
 
       {/* Narrative */}
       <div className="bg-monad-card border border-monad-border rounded-lg p-5">
-        <div className="text-sm font-bold text-monad-purple mb-3">Battle Narrative</div>
+        <div className="flex items-center justify-between mb-3">
+          <div className="text-sm font-bold text-monad-purple">Battle Narrative</div>
+          {narrativeTxHash && (
+            <a
+              href={`${explorerUrl}/tx/${narrativeTxHash}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-green-400 hover:text-green-300 flex items-center gap-1 transition-colors"
+              title="Narrative stored permanently on Monad"
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-green-400 inline-block" />
+              Stored on Monad
+            </a>
+          )}
+          {narrativeLoading && !narrativeTxHash && (
+            <span className="text-xs text-gray-600 animate-pulse">Writing to chain...</span>
+          )}
+        </div>
         {narrativeLoading ? (
           <div className="space-y-2 animate-pulse">
             <div className="h-3 bg-monad-border rounded w-full" />

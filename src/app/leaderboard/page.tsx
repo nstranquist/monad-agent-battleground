@@ -4,6 +4,7 @@ import { useState, useMemo } from "react";
 import { useReadContract, useReadContracts } from "wagmi";
 import { useContracts } from "@/hooks/useContracts";
 import { Agent } from "@/lib/types";
+import { TEST_ADDRESSES } from "@/lib/constants";
 import Link from "next/link";
 
 const PAGE_SIZE = 50;
@@ -56,12 +57,12 @@ export default function LeaderboardPage() {
     },
   });
 
-  // ── 4. Parse + sort by wins desc ──────────────────────────────────────────
+  // ── 4. Parse, filter test wallets, sort by wins desc ──────────────────────
   const agents = useMemo<Agent[]>(() => {
     if (!agentResults) return [];
     return agentResults
       .map((r) => r.result as Agent | undefined)
-      .filter((a): a is Agent => !!a)
+      .filter((a): a is Agent => !!a && !TEST_ADDRESSES.has(a.owner.toLowerCase()))
       .sort((a, b) => Number(b.wins) - Number(a.wins));
   }, [agentResults]);
 

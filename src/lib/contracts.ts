@@ -3,6 +3,9 @@ export const AGENT_NFT_ADDRESS = (process.env.NEXT_PUBLIC_AGENT_NFT_ADDRESS ||
   process.env.NEXT_PUBLIC_AGENT_REGISTRY_ADDRESS ||
   "") as `0x${string}`;
 
+export const NARRATIVE_REGISTRY_ADDRESS = (process.env
+  .NEXT_PUBLIC_NARRATIVE_REGISTRY_ADDRESS || "") as `0x${string}`;
+
 export const BATTLE_ARENA_ADDRESS = (process.env
   .NEXT_PUBLIC_BATTLE_ARENA_ADDRESS || "") as `0x${string}`;
 
@@ -13,6 +16,9 @@ export const AGENT_NFT_ADDRESS_MAINNET = (process.env
 export const BATTLE_ARENA_ADDRESS_MAINNET = (process.env
   .NEXT_PUBLIC_BATTLE_ARENA_ADDRESS_MAINNET || "") as `0x${string}`;
 
+export const NARRATIVE_REGISTRY_ADDRESS_MAINNET = (process.env
+  .NEXT_PUBLIC_NARRATIVE_REGISTRY_ADDRESS_MAINNET || "") as `0x${string}`;
+
 // ── Chain-aware address resolver ──────────────────────────────────────────────
 export function getContractAddresses(chainId: number) {
   const isMainnet = chainId === 143;
@@ -21,6 +27,9 @@ export function getContractAddresses(chainId: number) {
     battleArenaAddress: isMainnet
       ? BATTLE_ARENA_ADDRESS_MAINNET
       : BATTLE_ARENA_ADDRESS,
+    narrativeRegistryAddress: isMainnet
+      ? NARRATIVE_REGISTRY_ADDRESS_MAINNET
+      : NARRATIVE_REGISTRY_ADDRESS,
     explorerUrl: isMainnet
       ? "https://explorer.monad.xyz"
       : "https://testnet.monadexplorer.com",
@@ -228,6 +237,43 @@ export const BATTLE_ARENA_ABI = [
       { name: "winnerAgentId", type: "uint256", indexed: true },
       { name: "winner", type: "address", indexed: false },
       { name: "payout", type: "uint256", indexed: false },
+    ],
+  },
+] as const;
+
+// ─── NarrativeRegistry ABI ────────────────────────────────────────────────────
+
+export const NARRATIVE_REGISTRY_ABI = [
+  {
+    type: "function",
+    name: "setNarrative",
+    inputs: [
+      { name: "battleId", type: "uint256" },
+      { name: "narrative", type: "string" },
+    ],
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    name: "getNarrative",
+    inputs: [{ name: "battleId", type: "uint256" }],
+    outputs: [{ name: "", type: "string" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "authority",
+    inputs: [],
+    outputs: [{ name: "", type: "address" }],
+    stateMutability: "view",
+  },
+  {
+    type: "event",
+    name: "NarrativeStored",
+    inputs: [
+      { name: "battleId", type: "uint256", indexed: true },
+      { name: "narrative", type: "string", indexed: false },
     ],
   },
 ] as const;

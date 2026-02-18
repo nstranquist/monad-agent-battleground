@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
-import { createPublicClient, http } from "viem";
+import { createPublicClient, createWalletClient, http } from "viem";
+import { privateKeyToAccount } from "viem/accounts";
 import { monadTestnet } from "@/lib/chains";
 import {
   AGENT_NFT_ADDRESS,
   AGENT_NFT_ABI,
   BATTLE_ARENA_ADDRESS,
   BATTLE_ARENA_ABI,
+  NARRATIVE_REGISTRY_ADDRESS,
+  NARRATIVE_REGISTRY_ABI,
 } from "@/lib/contracts";
 
 // In-memory rate limiter: 100 requests per IP per minute (generous for demo)
@@ -33,6 +36,22 @@ const publicClient = createPublicClient({
     "https://lb.drpc.live/monad-testnet/AmbwnCrPI0c2nb3_DZivVy6GqQ7XDGUR8bLFcs5opQTS"
   ),
 });
+
+// Server-side wallet for writing narratives onchain (deployer pays gas)
+function getWalletClient() {
+  const rawKey = process.env.DEPLOYER_PRIVATE_KEY;
+  if (!rawKey) return null;
+  const key = (rawKey.startsWith("0x") ? rawKey : `0x${rawKey}`) as `0x${string}`;
+  const account = privateKeyToAccount(key);
+  return createWalletClient({
+    account,
+    chain: monadTestnet,
+    transport: http(
+      process.env.DRPC_MONAD_TESTNET_URL ||
+      "https://lb.drpc.live/monad-testnet/AmbwnCrPI0c2nb3_DZivVy6GqQ7XDGUR8bLFcs5opQTS"
+    ),
+  });
+}
 
 const FALLBACK =
   "Two champions clashed in the digital arena, their stats colliding in milliseconds on Monad's blazing chain. The battle was fierce, decided in a single atomic transaction. One fighter emerged victorious, claiming the prize MON and ascending the leaderboard for eternity.";
@@ -93,7 +112,28 @@ Output only the narrative. Mention both names. Let their personalities shape the
     });
 
     const narrative = msg.content[0].type === "text" ? msg.content[0].text : FALLBACK;
-    return NextResponse.json({ narrative, winner: winner.name, loser: loser.name });
+
+    // ── Store narrative onchain ────────────────────────────────────────────────
+    // We await only the tx submission (not confirmation) — Monad is fast so
+    // this adds < 200ms latency while giving us a real tx hash to link to.
+    let narrativeTxHash: string | null = null;
+    if (NARRATIVE_REGISTRY_ADDRESS) {
+      const walletClient = getWalletClient();
+      if (walletClient) {
+        try {
+          narrativeTxHash = await walletClient.writeContract({
+            address: NARRATIVE_REGISTRY_ADDRESS,
+            abi: NARRATIVE_REGISTRY_ABI,
+            functionName: "setNarrative",
+            args: [BigInt(battleId), narrative],
+          });
+        } catch (err) {
+          console.error("NarrativeRegistry write failed:", err);
+        }
+      }
+    }
+
+    return NextResponse.json({ narrative, winner: winner.name, loser: loser.name, narrativeTxHash });
   } catch (error) {
     console.error("Narrative error:", error);
     return NextResponse.json({ narrative: FALLBACK });
