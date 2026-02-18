@@ -13,6 +13,7 @@ const QUERY_CONFIG = {
   staleTime: 60_000,       // treat data as fresh for 60s
   refetchInterval: false,  // no polling
   gcTime: 5 * 60_000,     // keep in cache 5 min
+  retry: false,            // don't retry on decode errors
 } as const;
 
 export default function LeaderboardPage() {

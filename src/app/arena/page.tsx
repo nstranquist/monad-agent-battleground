@@ -15,6 +15,7 @@ const QUERY_CONFIG = {
   staleTime: 30_000,
   refetchInterval: false as const,
   gcTime: 5 * 60_000,
+  retry: false,
 } as const;
 
 // Three.js is browser-only — must be dynamically imported with ssr: false

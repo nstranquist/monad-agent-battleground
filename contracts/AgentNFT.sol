@@ -23,6 +23,7 @@ contract AgentNFT is ERC721 {
         uint8 strength;      // min 1, sum of str+spd+int == 10
         uint8 speed;
         uint8 intelligence;
+        string personalityPrompt;
         uint256 wins;
         uint256 losses;
         uint256 createdAt;
@@ -73,7 +74,6 @@ contract AgentNFT is ERC721 {
     // -------------------------------------------------------------------------
 
     /// @notice Mint your soulbound agent champion. Stats must sum to exactly 10.
-    /// @dev personalityPrompt is emitted as an event only — not stored on-chain to save gas.
     function mint(
         string calldata name,
         uint8 strength,
@@ -97,6 +97,7 @@ contract AgentNFT is ERC721 {
             strength: strength,
             speed: speed,
             intelligence: intelligence,
+            personalityPrompt: personalityPrompt,
             wins: 0,
             losses: 0,
             createdAt: block.timestamp,
@@ -114,11 +115,12 @@ contract AgentNFT is ERC721 {
     // Customization
     // -------------------------------------------------------------------------
 
-    /// @notice Update your agent's personality prompt. Emitted as event only — not stored on-chain.
+    /// @notice Update your agent's personality prompt. Stored on-chain and emitted as an event.
     function updatePersonality(uint256 tokenId, string calldata prompt) external {
         require(_agents[tokenId].exists, "Agent not found");
         require(_agents[tokenId].owner == msg.sender, "Not your agent");
         require(bytes(prompt).length <= 200, "Max 200 chars");
+        _agents[tokenId].personalityPrompt = prompt;
         emit PersonalityUpdated(tokenId, prompt);
     }
 
