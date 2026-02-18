@@ -1,23 +1,33 @@
 "use client";
 
 import { useState, useCallback, useEffect } from "react";
+import dynamic from "next/dynamic";
 import { useAccount, useReadContract, useWriteContract, useWaitForTransactionReceipt } from "wagmi";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { formatEther } from "viem";
-import {
-  AGENT_NFT_ADDRESS,
-  AGENT_NFT_ABI,
-  BATTLE_ARENA_ADDRESS,
-  BATTLE_ARENA_ABI,
-  BATTLE_STAKE,
-} from "@/lib/contracts";
+import { useContracts } from "@/hooks/useContracts";
 import { AgentCard } from "@/components/AgentCard";
 import { Agent, Battle } from "@/lib/types";
+import type { BattlePhase } from "@/components/BattleArena3D";
+
+// Three.js is browser-only — must be dynamically imported with ssr: false
+const BattleArena3D = dynamic(
+  () => import("@/components/BattleArena3D").then((m) => ({ default: m.BattleArena3D })),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="w-full h-full flex items-center justify-center bg-[#04040f]">
+        <div className="text-gray-600 text-sm animate-pulse">Loading arena...</div>
+      </div>
+    ),
+  }
+);
 
 type Step = "select-my-agent" | "select-opponent" | "battling" | "battle-result";
 
 export default function ArenaPage() {
   const { address, isConnected } = useAccount();
+  const { agentNftAddress, agentNftAbi, battleArenaAddress, battleArenaAbi, battleStake } = useContracts();
   const [step, setStep] = useState<Step>("select-my-agent");
   const [myAgentId, setMyAgentId] = useState<bigint | null>(null);
   const [opponentAgentId, setOpponentAgentId] = useState<bigint | null>(null);
@@ -27,7 +37,7 @@ export default function ArenaPage() {
   const [pendingBattleId, setPendingBattleId] = useState<bigint | null>(null);
   const [txHash, setTxHash] = useState<`0x${string}` | null>(null);
   const [resolvedBattleId, setResolvedBattleId] = useState<bigint | null>(null);
-  const [clashPhase, setClashPhase] = useState<"idle" | "charging" | "clash" | "done">("idle");
+  const [clashPhase, setClashPhase] = useState<BattlePhase>("idle");
 
   const { writeContractAsync, isPending } = useWriteContract();
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({
@@ -36,15 +46,15 @@ export default function ArenaPage() {
 
   // Load all agent IDs
   const { data: allAgentIds } = useReadContract({
-    address: AGENT_NFT_ADDRESS,
-    abi: AGENT_NFT_ABI,
+    address: agentNftAddress,
+    abi: agentNftAbi,
     functionName: "getAllAgentIds",
   });
 
   // Load my agent IDs
   const { data: myAgentIds } = useReadContract({
-    address: AGENT_NFT_ADDRESS,
-    abi: AGENT_NFT_ABI,
+    address: agentNftAddress,
+    abi: agentNftAbi,
     functionName: "getOwnerAgents",
     args: address ? [address] : undefined,
     query: { enabled: !!address },
@@ -52,8 +62,8 @@ export default function ArenaPage() {
 
   // Load all battles
   const { data: allBattleIds } = useReadContract({
-    address: BATTLE_ARENA_ADDRESS,
-    abi: BATTLE_ARENA_ABI,
+    address: battleArenaAddress,
+    abi: battleArenaAbi,
     functionName: "getAllBattleIds",
   });
 
@@ -85,13 +95,16 @@ export default function ArenaPage() {
     setStep("battling");
     setClashPhase("charging");
 
-    // Clash animation sequence
-    const t1 = setTimeout(() => setClashPhase("clash"), 800);
+    // 3D clash animation sequence — extended to let the scene breathe
+    // charging: fighters rush toward center (0–1200ms)
+    // clash:    explosion + camera shake (1200–3200ms)
+    // done:     transition to result screen, narrative fetches in parallel
+    const t1 = setTimeout(() => setClashPhase("clash"), 1200);
     const t2 = setTimeout(() => {
       setClashPhase("done");
       setStep("battle-result");
       fetchNarrative(bid);
-    }, 1800);
+    }, 3200);
 
     return () => { clearTimeout(t1); clearTimeout(t2); };
   }, [isSuccess]);
@@ -100,11 +113,11 @@ export default function ArenaPage() {
     if (!myAgentId || !opponentAgentId) return;
     try {
       const hash = await writeContractAsync({
-        address: BATTLE_ARENA_ADDRESS,
-        abi: BATTLE_ARENA_ABI,
+        address: battleArenaAddress,
+        abi: battleArenaAbi,
         functionName: "challenge",
         args: [myAgentId, opponentAgentId],
-        value: BATTLE_STAKE,
+        value: battleStake,
       });
       setTxHash(hash);
       setBattleId(null); // will be resolved from contract
@@ -116,11 +129,11 @@ export default function ArenaPage() {
   const handleAcceptChallenge = async (bid: bigint) => {
     try {
       const hash = await writeContractAsync({
-        address: BATTLE_ARENA_ADDRESS,
-        abi: BATTLE_ARENA_ABI,
+        address: battleArenaAddress,
+        abi: battleArenaAbi,
         functionName: "acceptChallenge",
         args: [bid],
-        value: BATTLE_STAKE,
+        value: battleStake,
       });
       setTxHash(hash);
       setPendingBattleId(bid);
@@ -179,7 +192,7 @@ export default function ArenaPage() {
         <p className="text-gray-400">
           Select your agent, challenge an opponent, and stake{" "}
           <span className="text-monad-purple font-bold">
-            {formatEther(BATTLE_STAKE)} MON
+            {formatEther(battleStake)} MON
           </span>{" "}
           per side.
         </p>
@@ -261,7 +274,7 @@ export default function ArenaPage() {
                 ? "Confirm in wallet..."
                 : isConfirming
                 ? "⏳ On-chain battle..."
-                : `⚔ FIGHT! (stake ${formatEther(BATTLE_STAKE)} MON)`}
+                : `⚔ FIGHT! (stake ${formatEther(battleStake)} MON)`}
             </button>
           </div>
         </AgentSelector>
@@ -280,7 +293,14 @@ export default function ArenaPage() {
   );
 }
 
-// ── Clash animation screen ────────────────────────────────────────────────────
+// ── Clash animation screen (3D) ───────────────────────────────────────────────
+
+const PHASE_LABEL: Record<BattlePhase, string> = {
+  idle:     "Entering the Arena...",
+  charging: "CHARGING FORWARD",
+  clash:    "⚡ CLASH ⚡",
+  done:     "Battle Resolved",
+};
 
 function ClashScreen({
   myAgentId,
@@ -289,73 +309,56 @@ function ClashScreen({
 }: {
   myAgentId: bigint | null;
   opponentAgentId: bigint | null;
-  phase: "idle" | "charging" | "clash" | "done";
+  phase: BattlePhase;
 }) {
+  const { agentNftAddress, agentNftAbi } = useContracts();
   const { data: myAgent } = useReadContract({
-    address: AGENT_NFT_ADDRESS,
-    abi: AGENT_NFT_ABI,
+    address: agentNftAddress,
+    abi: agentNftAbi,
     functionName: "getAgent",
     args: myAgentId ? [myAgentId] : undefined,
     query: { enabled: !!myAgentId },
   }) as { data: Agent | undefined };
 
   const { data: oppAgent } = useReadContract({
-    address: AGENT_NFT_ADDRESS,
-    abi: AGENT_NFT_ABI,
+    address: agentNftAddress,
+    abi: agentNftAbi,
     functionName: "getAgent",
     args: opponentAgentId ? [opponentAgentId] : undefined,
     query: { enabled: !!opponentAgentId },
   }) as { data: Agent | undefined };
 
+  const isClash = phase === "clash";
+
   return (
-    <div className="flex flex-col items-center justify-center min-h-[60vh] space-y-8">
-      <h2 className="text-2xl font-bold text-monad-purple animate-pulse">
-        Battle in progress...
-      </h2>
+    <div className="relative w-full" style={{ height: "72vh" }}>
+      {/* 3D canvas */}
+      <BattleArena3D
+        myAgent={myAgent as Agent | undefined}
+        oppAgent={oppAgent as Agent | undefined}
+        phase={phase}
+      />
 
-      <div className="flex items-center gap-8 w-full max-w-lg">
-        {/* My fighter */}
+      {/* Phase overlay — bottom center */}
+      <div className="absolute inset-x-0 bottom-6 flex flex-col items-center gap-1.5 pointer-events-none">
         <div
-          className={`flex-1 text-center transition-all duration-700 ${
-            phase === "charging" ? "battle-slide-left" :
-            phase === "clash" ? "battle-shake" : ""
+          className={`font-bold tracking-widest transition-all duration-300 ${
+            isClash
+              ? "text-2xl text-white scale-110"
+              : "text-base text-monad-purple"
           }`}
+          style={
+            isClash
+              ? { textShadow: "0 0 20px #fff, 0 0 40px #836ef9" }
+              : undefined
+          }
         >
-          <div className="text-5xl mb-2">🤖</div>
-          <div className="font-bold text-white">{myAgent?.name ?? "..."}</div>
-          <div className="text-xs text-monad-purple mt-1">
-            {myAgent ? `${myAgent.strength}/${myAgent.speed}/${myAgent.intelligence}` : ""}
-          </div>
+          {PHASE_LABEL[phase]}
         </div>
-
-        {/* Clash effect */}
-        <div className="relative w-16 flex-shrink-0 flex items-center justify-center">
-          {phase === "clash" && (
-            <div className="text-4xl battle-flash">⚡</div>
-          )}
-          {phase !== "clash" && (
-            <div className="text-2xl text-gray-600">⚔</div>
-          )}
-        </div>
-
-        {/* Opponent */}
-        <div
-          className={`flex-1 text-center transition-all duration-700 ${
-            phase === "charging" ? "battle-slide-right" :
-            phase === "clash" ? "battle-shake" : ""
-          }`}
-        >
-          <div className="text-5xl mb-2">🤖</div>
-          <div className="font-bold text-white">{oppAgent?.name ?? "..."}</div>
-          <div className="text-xs text-monad-purple mt-1">
-            {oppAgent ? `${oppAgent.strength}/${oppAgent.speed}/${oppAgent.intelligence}` : ""}
-          </div>
+        <div className="text-xs text-gray-600 animate-pulse tracking-widest">
+          RESOLVING ON MONAD
         </div>
       </div>
-
-      <p className="text-sm text-gray-500 animate-pulse">
-        Resolving on Monad...
-      </p>
     </div>
   );
 }
@@ -373,32 +376,33 @@ function BattleResultScreen({
   narrativeLoading: boolean;
   onReset: () => void;
 }) {
+  const { agentNftAddress, agentNftAbi, battleArenaAddress, battleArenaAbi, battleStake } = useContracts();
   const { data: battle } = useReadContract({
-    address: BATTLE_ARENA_ADDRESS,
-    abi: BATTLE_ARENA_ABI,
+    address: battleArenaAddress,
+    abi: battleArenaAbi,
     functionName: "getBattle",
     args: [battleId],
   }) as { data: Battle | undefined };
 
   const { data: winnerAgent } = useReadContract({
-    address: AGENT_NFT_ADDRESS,
-    abi: AGENT_NFT_ABI,
+    address: agentNftAddress,
+    abi: agentNftAbi,
     functionName: "getAgent",
     args: battle?.winnerAgentId ? [battle.winnerAgentId] : undefined,
     query: { enabled: !!battle?.winnerAgentId },
   }) as { data: Agent | undefined };
 
   const { data: challengerAgent } = useReadContract({
-    address: AGENT_NFT_ADDRESS,
-    abi: AGENT_NFT_ABI,
+    address: agentNftAddress,
+    abi: agentNftAbi,
     functionName: "getAgent",
     args: battle?.challengerAgentId ? [battle.challengerAgentId] : undefined,
     query: { enabled: !!battle },
   }) as { data: Agent | undefined };
 
   const { data: challengedAgent } = useReadContract({
-    address: AGENT_NFT_ADDRESS,
-    abi: AGENT_NFT_ABI,
+    address: agentNftAddress,
+    abi: agentNftAbi,
     functionName: "getAgent",
     args: battle?.challengedAgentId ? [battle.challengedAgentId] : undefined,
     query: { enabled: !!battle },
@@ -426,7 +430,7 @@ function BattleResultScreen({
             </p>
           )}
           <p className="text-gray-500 text-xs">
-            Payout: {formatEther(BATTLE_STAKE * 2n)} MON · Battle #{battleId.toString()}
+            Payout: {formatEther(battleStake * 2n)} MON · Battle #{battleId.toString()}
           </p>
         </div>
       ) : (
@@ -532,9 +536,10 @@ function AgentCardLoader({
   selected?: boolean;
   onClick?: () => void;
 }) {
+  const { agentNftAddress, agentNftAbi } = useContracts();
   const { data: agent } = useReadContract({
-    address: AGENT_NFT_ADDRESS,
-    abi: AGENT_NFT_ABI,
+    address: agentNftAddress,
+    abi: agentNftAbi,
     functionName: "getAgent",
     args: [agentId],
   });
@@ -608,24 +613,25 @@ function BattleRow({
   isPending: boolean;
   isConfirming: boolean;
 }) {
+  const { agentNftAddress, agentNftAbi, battleArenaAddress, battleArenaAbi } = useContracts();
   const { data: battle } = useReadContract({
-    address: BATTLE_ARENA_ADDRESS,
-    abi: BATTLE_ARENA_ABI,
+    address: battleArenaAddress,
+    abi: battleArenaAbi,
     functionName: "getBattle",
     args: [battleId],
   }) as { data: Battle | undefined };
 
   const { data: challengerAgent } = useReadContract({
-    address: AGENT_NFT_ADDRESS,
-    abi: AGENT_NFT_ABI,
+    address: agentNftAddress,
+    abi: agentNftAbi,
     functionName: "getAgent",
     args: battle ? [battle.challengerAgentId] : undefined,
     query: { enabled: !!battle },
   });
 
   const { data: challengedAgent } = useReadContract({
-    address: AGENT_NFT_ADDRESS,
-    abi: AGENT_NFT_ABI,
+    address: agentNftAddress,
+    abi: agentNftAbi,
     functionName: "getAgent",
     args: battle ? [battle.challengedAgentId] : undefined,
     query: { enabled: !!battle },

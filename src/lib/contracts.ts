@@ -1,3 +1,4 @@
+// ── Testnet (chain 10143) ─────────────────────────────────────────────────────
 export const AGENT_NFT_ADDRESS = (process.env.NEXT_PUBLIC_AGENT_NFT_ADDRESS ||
   process.env.NEXT_PUBLIC_AGENT_REGISTRY_ADDRESS ||
   "") as `0x${string}`;
@@ -5,9 +6,30 @@ export const AGENT_NFT_ADDRESS = (process.env.NEXT_PUBLIC_AGENT_NFT_ADDRESS ||
 export const BATTLE_ARENA_ADDRESS = (process.env
   .NEXT_PUBLIC_BATTLE_ARENA_ADDRESS || "") as `0x${string}`;
 
-// Backward-compat alias used by existing components
-export const AGENT_REGISTRY_ADDRESS = AGENT_NFT_ADDRESS;
+// ── Mainnet (chain 143) ───────────────────────────────────────────────────────
+export const AGENT_NFT_ADDRESS_MAINNET = (process.env
+  .NEXT_PUBLIC_AGENT_NFT_ADDRESS_MAINNET || "") as `0x${string}`;
 
+export const BATTLE_ARENA_ADDRESS_MAINNET = (process.env
+  .NEXT_PUBLIC_BATTLE_ARENA_ADDRESS_MAINNET || "") as `0x${string}`;
+
+// ── Chain-aware address resolver ──────────────────────────────────────────────
+export function getContractAddresses(chainId: number) {
+  const isMainnet = chainId === 143;
+  return {
+    agentNftAddress: isMainnet ? AGENT_NFT_ADDRESS_MAINNET : AGENT_NFT_ADDRESS,
+    battleArenaAddress: isMainnet
+      ? BATTLE_ARENA_ADDRESS_MAINNET
+      : BATTLE_ARENA_ADDRESS,
+    explorerUrl: isMainnet
+      ? "https://explorer.monad.xyz"
+      : "https://testnet.monadexplorer.com",
+    networkLabel: isMainnet ? "Monad Mainnet" : "Monad Testnet",
+  };
+}
+
+// ── Backward-compat aliases ───────────────────────────────────────────────────
+export const AGENT_REGISTRY_ADDRESS = AGENT_NFT_ADDRESS;
 export const BATTLE_STAKE = BigInt("1000000000000000"); // 0.001 MON
 
 // ─── AgentNFT ABI ─────────────────────────────────────────────────────────────

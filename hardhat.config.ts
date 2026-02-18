@@ -2,6 +2,9 @@ import { HardhatUserConfig } from "hardhat/config";
 import "@nomicfoundation/hardhat-toolbox";
 import * as dotenv from "dotenv";
 
+// NOTE: tsconfig.hardhat.json is required for hardhat/ts-node to work alongside
+// Next.js (which uses "module": "esnext" / "moduleResolution": "bundler").
+// The npm scripts set TS_NODE_PROJECT=tsconfig.hardhat.json before hardhat runs.
 dotenv.config({ path: ".env.local" });
 
 const config: HardhatUserConfig = {
@@ -19,6 +22,15 @@ const config: HardhatUserConfig = {
     monad: {
       url: "https://testnet-rpc.monad.xyz",
       chainId: 10143,
+      accounts:
+        process.env.DEPLOYER_PRIVATE_KEY &&
+        process.env.DEPLOYER_PRIVATE_KEY.length === 64
+          ? [process.env.DEPLOYER_PRIVATE_KEY]
+          : [],
+    },
+    monadMainnet: {
+      url: "https://rpc.monad.xyz",
+      chainId: 143,
       accounts:
         process.env.DEPLOYER_PRIVATE_KEY &&
         process.env.DEPLOYER_PRIVATE_KEY.length === 64

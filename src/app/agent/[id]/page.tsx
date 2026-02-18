@@ -2,11 +2,10 @@
 
 import { use, useState } from "react";
 import { useAccount, useReadContract, useWriteContract, useWaitForTransactionReceipt } from "wagmi";
-import { AGENT_NFT_ADDRESS, AGENT_NFT_ABI } from "@/lib/contracts";
+import { useContracts } from "@/hooks/useContracts";
 import { Agent } from "@/lib/types";
 import Link from "next/link";
 import { formatEther } from "viem";
-import { BATTLE_STAKE } from "@/lib/contracts";
 
 function getClass(str: number, spd: number, intel: number): string {
   if (str >= 6) return "BERSERKER";
@@ -21,20 +20,21 @@ function getClass(str: number, spd: number, intel: number): string {
 export default function AgentPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const { address } = useAccount();
+  const { agentNftAddress, agentNftAbi, battleStake, explorerUrl, networkLabel } = useContracts();
   const [editingPersonality, setEditingPersonality] = useState(false);
   const [newPersonality, setNewPersonality] = useState("");
   const [updateTxHash, setUpdateTxHash] = useState<`0x${string}` | null>(null);
 
   const { data: agent, refetch } = useReadContract({
-    address: AGENT_NFT_ADDRESS,
-    abi: AGENT_NFT_ABI,
+    address: agentNftAddress,
+    abi: agentNftAbi,
     functionName: "getAgent",
     args: [BigInt(id)],
   }) as { data: Agent | undefined; refetch: () => void };
 
   const { data: tokenURI } = useReadContract({
-    address: AGENT_NFT_ADDRESS,
-    abi: AGENT_NFT_ABI,
+    address: agentNftAddress,
+    abi: agentNftAbi,
     functionName: "tokenURI",
     args: [BigInt(id)],
   }) as { data: string | undefined };
@@ -54,8 +54,8 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
     if (!newPersonality.trim()) return;
     try {
       const hash = await writeContractAsync({
-        address: AGENT_NFT_ADDRESS,
-        abi: AGENT_NFT_ABI,
+        address: agentNftAddress,
+        abi: agentNftAbi,
         functionName: "updatePersonality",
         args: [BigInt(id), newPersonality.trim()],
       });
@@ -99,7 +99,7 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
         <Link href="/arena" className="text-sm text-gray-500 hover:text-monad-purple transition-colors">
           ← Back to Arena
         </Link>
-        <span className="text-xs text-gray-600">Token #{id} · Monad Testnet</span>
+        <span className="text-xs text-gray-600">Token #{id} · {networkLabel}</span>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -208,7 +208,7 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
           <div className="text-xs text-gray-600">
             Owner:{" "}
             <a
-              href={`https://testnet.monadexplorer.com/address/${agent.owner}`}
+              href={`${explorerUrl}/address/${agent.owner}`}
               target="_blank"
               rel="noopener noreferrer"
               className="text-monad-purple hover:underline"
@@ -223,7 +223,7 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
             href="/arena"
             className="block w-full py-3 bg-monad-purple hover:bg-monad-purple/80 text-white font-bold rounded-lg text-center transition-colors"
           >
-            ⚔ Fight (stake {formatEther(BATTLE_STAKE)} MON)
+            ⚔ Fight (stake {formatEther(battleStake)} MON)
           </Link>
         </div>
       </div>

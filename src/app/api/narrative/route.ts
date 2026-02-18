@@ -9,6 +9,23 @@ import {
   BATTLE_ARENA_ABI,
 } from "@/lib/contracts";
 
+// In-memory rate limiter: 10 requests per IP per minute
+const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
+const RATE_LIMIT = 10;
+const WINDOW_MS = 60_000;
+
+function checkRateLimit(ip: string): boolean {
+  const now = Date.now();
+  const entry = rateLimitMap.get(ip);
+  if (!entry || now > entry.resetAt) {
+    rateLimitMap.set(ip, { count: 1, resetAt: now + WINDOW_MS });
+    return true;
+  }
+  if (entry.count >= RATE_LIMIT) return false;
+  entry.count++;
+  return true;
+}
+
 const publicClient = createPublicClient({
   chain: monadTestnet,
   transport: http(),
@@ -18,6 +35,11 @@ const FALLBACK =
   "Two champions clashed in the digital arena, their stats colliding in milliseconds on Monad's blazing chain. The battle was fierce, decided in a single atomic transaction. One fighter emerged victorious, claiming the prize MON and ascending the leaderboard for eternity.";
 
 export async function POST(req: NextRequest) {
+  const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+  if (!checkRateLimit(ip)) {
+    return NextResponse.json({ error: "Rate limit exceeded. Try again in a minute." }, { status: 429 });
+  }
+
   try {
     const { battleId } = await req.json();
     if (!battleId) return NextResponse.json({ error: "battleId required" }, { status: 400 });

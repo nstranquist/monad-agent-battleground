@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useAccount, useWriteContract, useWaitForTransactionReceipt } from "wagmi";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
-import { AGENT_NFT_ADDRESS, AGENT_NFT_ABI } from "@/lib/contracts";
+import { useContracts } from "@/hooks/useContracts";
 import Link from "next/link";
 
 const TOTAL_POINTS = 10;
@@ -18,6 +18,7 @@ const PERSONALITY_EXAMPLES = [
 
 export default function CreateAgentPage() {
   const { isConnected } = useAccount();
+  const { agentNftAddress, agentNftAbi, networkLabel } = useContracts();
   const [name, setName] = useState("");
   const [stats, setStats] = useState({ strength: 4, speed: 3, intelligence: 3 });
   const [personality, setPersonality] = useState("");
@@ -40,8 +41,8 @@ export default function CreateAgentPage() {
     if (!name.trim() || remaining !== 0) return;
     try {
       const hash = await writeContractAsync({
-        address: AGENT_NFT_ADDRESS,
-        abi: AGENT_NFT_ABI,
+        address: agentNftAddress,
+        abi: agentNftAbi,
         functionName: "mint",
         args: [
           name.trim(),
@@ -180,7 +181,7 @@ export default function CreateAgentPage() {
           <span>Type</span><span className="text-white">Soulbound NFT</span>
         </div>
         <div className="flex justify-between text-gray-400">
-          <span>Network</span><span className="text-white">Monad Testnet (10143)</span>
+          <span>Network</span><span className="text-white">{networkLabel}</span>
         </div>
         {personality && (
           <div className="pt-1 border-t border-monad-border text-gray-500 italic text-xs">
@@ -197,9 +198,9 @@ export default function CreateAgentPage() {
         {isPending ? "Confirm in Phantom..." : isConfirming ? "⏳ Minting on Monad..." : "Mint Champion →"}
       </button>
 
-      {!AGENT_NFT_ADDRESS && (
+      {!agentNftAddress && (
         <div className="text-xs text-yellow-500 text-center border border-yellow-500/30 rounded p-3">
-          ⚠ Contract not deployed. Run <code>npm run deploy:testnet</code> first.
+          ⚠ Contract not deployed on {networkLabel}. Switch networks or deploy first.
         </div>
       )}
     </div>

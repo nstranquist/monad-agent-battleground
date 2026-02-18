@@ -34,6 +34,9 @@ async function main() {
   console.log("BattleArena linked to AgentNFT");
 
   // Update .env.local with deployed addresses
+  const network = await ethers.provider.getNetwork();
+  const isMainnet = network.chainId === 143n;
+
   const envPath = path.join(__dirname, "../.env.local");
   let envContent = fs.existsSync(envPath) ? fs.readFileSync(envPath, "utf-8") : "";
 
@@ -44,10 +47,14 @@ async function main() {
       : content + `\n${key}=${value}`;
   };
 
-  envContent = setEnvVar(envContent, "NEXT_PUBLIC_AGENT_NFT_ADDRESS", nftAddr);
-  envContent = setEnvVar(envContent, "NEXT_PUBLIC_BATTLE_ARENA_ADDRESS", arenaAddr);
-  // Keep backward compat key pointing to NFT contract
-  envContent = setEnvVar(envContent, "NEXT_PUBLIC_AGENT_REGISTRY_ADDRESS", nftAddr);
+  if (isMainnet) {
+    envContent = setEnvVar(envContent, "NEXT_PUBLIC_AGENT_NFT_ADDRESS_MAINNET", nftAddr);
+    envContent = setEnvVar(envContent, "NEXT_PUBLIC_BATTLE_ARENA_ADDRESS_MAINNET", arenaAddr);
+  } else {
+    envContent = setEnvVar(envContent, "NEXT_PUBLIC_AGENT_NFT_ADDRESS", nftAddr);
+    envContent = setEnvVar(envContent, "NEXT_PUBLIC_BATTLE_ARENA_ADDRESS", arenaAddr);
+    envContent = setEnvVar(envContent, "NEXT_PUBLIC_AGENT_REGISTRY_ADDRESS", nftAddr);
+  }
   fs.writeFileSync(envPath, envContent.trim() + "\n");
 
   console.log("\n✅ Deployment complete!");
