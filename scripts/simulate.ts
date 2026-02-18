@@ -92,8 +92,8 @@ async function main() {
     const nameA  = BUILDS[aIdx].name;
     const nameB  = BUILDS[bIdx].name;
 
-    // Challenge
-    const challengeTx = await arena.challenge(agentA, agentB, { value: stake });
+    // Challenge (explicit gas limit; Monad testnet gas estimation can be off)
+    const challengeTx = await arena.challenge(agentA, agentB, { value: stake, gasLimit: 500_000 });
     const challengeReceipt = await challengeTx.wait();
     const battleEvent = challengeReceipt?.logs
       .map((log) => { try { return arena.interface.parseLog(log); } catch { return null; } })
@@ -102,7 +102,15 @@ async function main() {
     const battleId: bigint = battleEvent.args.battleId;
 
     // Accept (deployer also owns the challenged agent → valid)
-    const acceptTx = await arena.acceptChallenge(battleId, { value: stake });
+    // Dry-run first to surface revert reasons
+    try {
+      await arena.acceptChallenge.staticCall(battleId, { value: stake });
+    } catch (staticErr: unknown) {
+      const msg = staticErr instanceof Error ? staticErr.message : String(staticErr);
+      console.error(`  ❌ staticCall failed for acceptChallenge(battleId=${battleId}):`, msg);
+      throw staticErr;
+    }
+    const acceptTx = await arena.acceptChallenge(battleId, { value: stake, gasLimit: 500_000 });
     const acceptReceipt = await acceptTx.wait();
     const resolveEvent = acceptReceipt?.logs
       .map((log) => { try { return arena.interface.parseLog(log); } catch { return null; } })

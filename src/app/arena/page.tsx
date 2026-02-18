@@ -579,13 +579,13 @@ function PendingChallenges({
   isPending: boolean;
   isConfirming: boolean;
 }) {
-  if (!allBattleIds || allBattleIds.length === 0) return null;
+  if (!allBattleIds || allBattleIds.length === 0 || !myAgentIds || myAgentIds.length === 0) return null;
 
   return (
     <div className="space-y-4">
       <h2 className="text-xl font-bold">Pending Challenges</h2>
       <div className="space-y-2">
-        {allBattleIds.slice(-10).map((id) => (
+        {allBattleIds.slice(-50).map((id) => (
           <BattleRow
             key={id.toString()}
             battleId={id}
@@ -640,9 +640,13 @@ function BattleRow({
   if (!battle || !challengerAgent || !challengedAgent) return null;
 
   const isMyChallengedAgent = myAgentIds?.includes(battle.challengedAgentId);
+
+  // Only show pending challenges where one of my agents is being challenged
+  if (battle.status !== 0 || !isMyChallengedAgent) return null;
+
   const statusLabel = ["Pending ⏳", "Completed ✅", "Cancelled ❌"][battle.status];
   const winnerName =
-    battle.status === 1 && battle.winnerAgentId
+    (battle.status as number) === 1 && battle.winnerAgentId
       ? battle.winnerAgentId === battle.challengerAgentId
         ? (challengerAgent as Agent).name
         : (challengedAgent as Agent).name

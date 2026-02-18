@@ -1,9 +1,15 @@
 "use client";
 
-import { use, useState } from "react";
-import { useAccount, useReadContract, useWriteContract, useWaitForTransactionReceipt } from "wagmi";
+import { use, useState, useMemo } from "react";
+import {
+  useAccount,
+  useReadContract,
+  useReadContracts,
+  useWriteContract,
+  useWaitForTransactionReceipt,
+} from "wagmi";
 import { useContracts } from "@/hooks/useContracts";
-import { Agent } from "@/lib/types";
+import { Agent, Battle } from "@/lib/types";
 import Link from "next/link";
 import { formatEther } from "viem";
 
@@ -17,10 +23,27 @@ function getClass(str: number, spd: number, intel: number): string {
   return "SAGE";
 }
 
+function formatDate(timestamp: bigint): string {
+  return new Date(Number(timestamp) * 1000).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
 export default function AgentPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  const agentId = BigInt(id);
   const { address } = useAccount();
-  const { agentNftAddress, agentNftAbi, battleStake, explorerUrl, networkLabel } = useContracts();
+  const {
+    agentNftAddress,
+    agentNftAbi,
+    battleArenaAddress,
+    battleArenaAbi,
+    battleStake,
+    explorerUrl,
+    networkLabel,
+  } = useContracts();
   const [editingPersonality, setEditingPersonality] = useState(false);
   const [newPersonality, setNewPersonality] = useState("");
   const [updateTxHash, setUpdateTxHash] = useState<`0x${string}` | null>(null);
@@ -29,15 +52,80 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
     address: agentNftAddress,
     abi: agentNftAbi,
     functionName: "getAgent",
-    args: [BigInt(id)],
+    args: [agentId],
   }) as { data: Agent | undefined; refetch: () => void };
 
   const { data: tokenURI } = useReadContract({
     address: agentNftAddress,
     abi: agentNftAbi,
     functionName: "tokenURI",
-    args: [BigInt(id)],
+    args: [agentId],
   }) as { data: string | undefined };
+
+  // ── Battle history ────────────────────────────────────────────────────────────
+
+  const { data: allBattleIds } = useReadContract({
+    address: battleArenaAddress,
+    abi: battleArenaAbi,
+    functionName: "getAllBattleIds",
+  }) as { data: bigint[] | undefined };
+
+  const { data: battlesRaw, isLoading: battlesLoading } = useReadContracts({
+    contracts: (allBattleIds ?? []).map((bid) => ({
+      address: battleArenaAddress,
+      abi: battleArenaAbi,
+      functionName: "getBattle" as const,
+      args: [bid] as [bigint],
+    })),
+    query: { enabled: !!allBattleIds && allBattleIds.length > 0 },
+  });
+
+  // Filter to completed battles involving this agent, newest first
+  const agentBattles = useMemo<Battle[]>(() => {
+    if (!battlesRaw) return [];
+    return battlesRaw
+      .map((r) => r.result as Battle | undefined)
+      .filter((b): b is Battle => {
+        if (!b) return false;
+        return (
+          b.status === 1 &&
+          (b.challengerAgentId === agentId || b.challengedAgentId === agentId)
+        );
+      })
+      .sort((a, b) => Number(b.resolvedAt) - Number(a.resolvedAt));
+  }, [battlesRaw, agentId]);
+
+  // Unique opponent IDs so we can batch-load their names
+  const opponentIds = useMemo<bigint[]>(() => {
+    const seen = new Map<string, bigint>();
+    for (const b of agentBattles) {
+      const opId = b.challengerAgentId === agentId ? b.challengedAgentId : b.challengerAgentId;
+      seen.set(opId.toString(), opId);
+    }
+    return Array.from(seen.values());
+  }, [agentBattles, agentId]);
+
+  const { data: opponentsRaw } = useReadContracts({
+    contracts: opponentIds.map((opId) => ({
+      address: agentNftAddress,
+      abi: agentNftAbi,
+      functionName: "getAgent" as const,
+      args: [opId] as [bigint],
+    })),
+    query: { enabled: opponentIds.length > 0 },
+  });
+
+  const opponentMap = useMemo<Map<string, Agent>>(() => {
+    const map = new Map<string, Agent>();
+    if (!opponentsRaw) return map;
+    opponentIds.forEach((opId, i) => {
+      const ag = opponentsRaw[i]?.result as Agent | undefined;
+      if (ag) map.set(opId.toString(), ag);
+    });
+    return map;
+  }, [opponentsRaw, opponentIds]);
+
+  // ── Personality update ────────────────────────────────────────────────────────
 
   const { writeContractAsync, isPending } = useWriteContract();
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({
@@ -57,7 +145,7 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
         address: agentNftAddress,
         abi: agentNftAbi,
         functionName: "updatePersonality",
-        args: [BigInt(id), newPersonality.trim()],
+        args: [agentId, newPersonality.trim()],
       });
       setUpdateTxHash(hash);
     } catch (e) {
@@ -65,7 +153,8 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
     }
   };
 
-  // Decode the onchain SVG from tokenURI
+  // ── Decode onchain SVG ────────────────────────────────────────────────────────
+
   let svgDataUrl: string | null = null;
   if (tokenURI && tokenURI.startsWith("data:application/json;base64,")) {
     try {
@@ -73,6 +162,8 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
       svgDataUrl = json.image;
     } catch {}
   }
+
+  // ── Loading skeleton ──────────────────────────────────────────────────────────
 
   if (!agent) {
     return (
@@ -99,13 +190,17 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
         <Link href="/arena" className="text-sm text-gray-500 hover:text-monad-purple transition-colors">
           ← Back to Arena
         </Link>
-        <span className="text-xs text-gray-600">Token #{id} · {networkLabel}</span>
+        <span className="text-xs text-gray-600">
+          Token #{id} · {networkLabel}
+        </span>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* NFT Card (onchain SVG) */}
         <div>
-          <div className="text-xs text-gray-600 mb-2 text-center">Live onchain SVG — updates with every battle</div>
+          <div className="text-xs text-gray-600 mb-2 text-center">
+            Live onchain SVG — updates with every battle
+          </div>
           {svgDataUrl ? (
             <img
               src={svgDataUrl}
@@ -197,9 +292,11 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
               </div>
             ) : (
               <p className="text-sm text-monad-purple/80 italic">
-                {agent.personalityPrompt
-                  ? `"${agent.personalityPrompt}"`
-                  : <span className="text-gray-600 not-italic">No personality set yet.</span>}
+                {agent.personalityPrompt ? (
+                  `"${agent.personalityPrompt}"`
+                ) : (
+                  <span className="text-gray-600 not-italic">No personality set yet.</span>
+                )}
               </p>
             )}
           </div>
@@ -227,9 +324,160 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
           </Link>
         </div>
       </div>
+
+      {/* Battle History */}
+      <BattleHistory
+        agentId={agentId}
+        battles={agentBattles}
+        opponentMap={opponentMap}
+        explorerUrl={explorerUrl}
+        isLoading={battlesLoading || (!!allBattleIds && allBattleIds.length > 0 && !battlesRaw)}
+      />
     </div>
   );
 }
+
+// ── Battle History section ─────────────────────────────────────────────────────
+
+function BattleHistory({
+  agentId,
+  battles,
+  opponentMap,
+  explorerUrl,
+  isLoading,
+}: {
+  agentId: bigint;
+  battles: Battle[];
+  opponentMap: Map<string, Agent>;
+  explorerUrl: string;
+  isLoading: boolean;
+}) {
+  return (
+    <div className="bg-monad-card border border-monad-border rounded-lg p-4">
+      <div className="flex items-center justify-between mb-4">
+        <div className="text-xs text-gray-500 font-bold tracking-widest">BATTLE HISTORY</div>
+        {battles.length > 0 && (
+          <div className="text-xs text-gray-600">{battles.length} completed</div>
+        )}
+      </div>
+
+      {isLoading ? (
+        <div className="space-y-2">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="animate-pulse h-14 bg-monad-dark rounded-lg" />
+          ))}
+        </div>
+      ) : battles.length === 0 ? (
+        <div className="text-center py-8 text-gray-600 text-sm">
+          No battles fought yet.{" "}
+          <Link href="/arena" className="text-monad-purple hover:underline">
+            Challenge someone!
+          </Link>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {battles.map((battle) => {
+            const isChallenger = battle.challengerAgentId === agentId;
+            const opponentId = isChallenger ? battle.challengedAgentId : battle.challengerAgentId;
+            const opponent = opponentMap.get(opponentId.toString());
+            const won = battle.winnerAgentId === agentId;
+            return (
+              <BattleRow
+                key={battle.id.toString()}
+                battle={battle}
+                won={won}
+                isChallenger={isChallenger}
+                opponent={opponent}
+                opponentId={opponentId}
+                explorerUrl={explorerUrl}
+              />
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BattleRow({
+  battle,
+  won,
+  isChallenger,
+  opponent,
+  opponentId,
+  explorerUrl,
+}: {
+  battle: Battle;
+  won: boolean;
+  isChallenger: boolean;
+  opponent: Agent | undefined;
+  opponentId: bigint;
+  explorerUrl: string;
+}) {
+  const opponentClass = opponent
+    ? getClass(opponent.strength, opponent.speed, opponent.intelligence)
+    : null;
+
+  return (
+    <div
+      className={`flex items-center gap-3 p-3 rounded-lg border transition-colors ${
+        won ? "border-green-500/20 bg-green-500/5" : "border-red-500/20 bg-red-500/5"
+      }`}
+    >
+      {/* Win/Loss badge */}
+      <div
+        className={`text-xs font-bold px-2 py-1 rounded flex-shrink-0 w-10 text-center ${
+          won ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"
+        }`}
+      >
+        {won ? "WIN" : "LOSS"}
+      </div>
+
+      {/* Opponent info */}
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-white font-medium">vs</span>
+          <Link
+            href={`/agent/${opponentId.toString()}`}
+            className="text-sm text-white hover:text-monad-purple transition-colors truncate"
+          >
+            {opponent?.name ?? `Agent #${opponentId.toString()}`}
+          </Link>
+          {opponentClass && (
+            <span className="text-xs text-monad-purple/50 hidden sm:block flex-shrink-0">
+              {opponentClass}
+            </span>
+          )}
+        </div>
+        <div className="text-xs text-gray-600 mt-0.5">
+          {isChallenger ? "Challenged" : "Defended"} · {formatDate(battle.resolvedAt)}
+        </div>
+      </div>
+
+      {/* Stake + Battle ID */}
+      <div className="text-right flex-shrink-0 space-y-0.5">
+        <div className={`text-xs font-medium ${won ? "text-green-400" : "text-red-400"}`}>
+          {won ? "+" : "-"}
+          {formatEther(battle.stake)} MON
+        </div>
+        <div className="text-xs text-gray-700">
+          Battle{" "}
+          <a
+            href={`${explorerUrl}/address/${battle.challenger}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover:text-monad-purple transition-colors"
+            title="View on explorer"
+          >
+            #{battle.id.toString()}
+          </a>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Shared stat bar ────────────────────────────────────────────────────────────
 
 function StatRow({ label, value, color }: { label: string; value: number; color: string }) {
   return (

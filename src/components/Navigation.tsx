@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
+import { useEffect, useState } from "react";
 
 const navLinks = [
   { href: "/", label: "Home" },
@@ -13,6 +14,8 @@ const navLinks = [
 
 export function Navigation() {
   const pathname = usePathname();
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
 
   return (
     <nav className="border-b border-monad-border bg-monad-dark/80 backdrop-blur-sm sticky top-0 z-50">
@@ -43,11 +46,15 @@ export function Navigation() {
           </div>
         </div>
 
-        <ConnectButton
-          showBalance={false}
-          chainStatus="icon"
-          accountStatus="avatar"
-        />
+        {mounted ? (
+          <ConnectButton
+            showBalance={false}
+            chainStatus="icon"
+            accountStatus="avatar"
+          />
+        ) : (
+          <div className="w-32 h-9 bg-monad-card border border-monad-border rounded-xl animate-pulse" />
+        )}
       </div>
     </nav>
   );
