@@ -12,7 +12,7 @@ async function main() {
   );
 
   // 1. Deploy AgentNFT (soulbound dynamic NFT)
-  console.log("\n[1/3] Deploying AgentNFT...");
+  console.log("\n[1/4] Deploying AgentNFT...");
   const AgentNFT = await ethers.getContractFactory("AgentNFT");
   const nft = await AgentNFT.deploy();
   await nft.waitForDeployment();
@@ -20,7 +20,7 @@ async function main() {
   console.log("AgentNFT deployed to:", nftAddr);
 
   // 2. Deploy BattleArena
-  console.log("\n[2/3] Deploying BattleArena...");
+  console.log("\n[2/4] Deploying BattleArena...");
   const BattleArena = await ethers.getContractFactory("BattleArena");
   const arena = await BattleArena.deploy(nftAddr);
   await arena.waitForDeployment();
@@ -28,10 +28,18 @@ async function main() {
   console.log("BattleArena deployed to:", arenaAddr);
 
   // 3. Link: tell AgentNFT who the BattleArena is
-  console.log("\n[3/3] Linking contracts...");
+  console.log("\n[3/4] Linking contracts...");
   const tx = await nft.setBattleArena(arenaAddr);
   await tx.wait();
   console.log("BattleArena linked to AgentNFT");
+
+  // 4. Deploy NarrativeRegistry (authority = deployer, same wallet the server uses)
+  console.log("\n[4/4] Deploying NarrativeRegistry...");
+  const NarrativeRegistry = await ethers.getContractFactory("NarrativeRegistry");
+  const narrative = await NarrativeRegistry.deploy(deployer.address);
+  await narrative.waitForDeployment();
+  const narrativeAddr = await narrative.getAddress();
+  console.log("NarrativeRegistry deployed to:", narrativeAddr);
 
   // Update .env.local with deployed addresses
   const network = await ethers.provider.getNetwork();
@@ -54,12 +62,15 @@ async function main() {
     envContent = setEnvVar(envContent, "NEXT_PUBLIC_AGENT_NFT_ADDRESS", nftAddr);
     envContent = setEnvVar(envContent, "NEXT_PUBLIC_BATTLE_ARENA_ADDRESS", arenaAddr);
     envContent = setEnvVar(envContent, "NEXT_PUBLIC_AGENT_REGISTRY_ADDRESS", nftAddr);
+    envContent = setEnvVar(envContent, "NEXT_PUBLIC_NARRATIVE_REGISTRY_ADDRESS", narrativeAddr);
+    envContent = setEnvVar(envContent, "NARRATIVE_REGISTRY_ADDRESS", narrativeAddr);
   }
   fs.writeFileSync(envPath, envContent.trim() + "\n");
 
   console.log("\n✅ Deployment complete!");
-  console.log("   AgentNFT:    ", nftAddr);
-  console.log("   BattleArena: ", arenaAddr);
+  console.log("   AgentNFT:           ", nftAddr);
+  console.log("   BattleArena:        ", arenaAddr);
+  console.log("   NarrativeRegistry:  ", narrativeAddr);
   console.log("\n.env.local updated. Run `npm run dev` to start the frontend.");
 }
 
