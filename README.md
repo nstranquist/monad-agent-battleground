@@ -83,8 +83,11 @@ Monad's parallel execution and sub-second finality makes **atomic battles** feel
 
 ## Network Info
 
-| Property | Value |
-|----------|-------|
-| Chain ID | 10143 |
-| RPC | https://testnet-rpc.monad.xyz |
+| Property | Value                             |
+| -------- | --------------------------------- |
+| Chain ID | 10143                             |
+| RPC      | https://testnet-rpc.monad.xyz     |
 | Explorer | https://testnet.monadexplorer.com |
+
+
+trigger redeploy
