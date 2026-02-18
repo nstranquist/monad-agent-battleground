@@ -10,6 +10,12 @@ import { AgentCard } from "@/components/AgentCard";
 import { Agent, Battle } from "@/lib/types";
 import type { BattlePhase } from "@/components/BattleArena3D";
 
+const QUERY_CONFIG = {
+  staleTime: 30_000,
+  refetchInterval: false as const,
+  gcTime: 5 * 60_000,
+} as const;
+
 // Three.js is browser-only — must be dynamically imported with ssr: false
 const BattleArena3D = dynamic(
   () => import("@/components/BattleArena3D").then((m) => ({ default: m.BattleArena3D })),
@@ -42,7 +48,14 @@ const TRAINER_BOT: Agent = {
 // Agents owned by these addresses are hidden from the opponent picker
 // (simulation / deployer test wallets that pollute the UI for real users)
 const TEST_ADDRESSES = new Set([
-  "0x87c1a9281abcb1b894792b49b4ff7b95de667201",
+  "0x87c1a9281abcb1b894792b49b4ff7b95de667201", // deployer / Rabby 1
+  "0xff6e8bb3190e1a76445db702aa522b3eedf5022e", // Rabby 2
+  "0x2fb62cfa3c06074c145f6c40bab3dfda1d9b20cf", // backup
+  "0xe1d58146bb59aba159588cdc4026ebb52bf516b6", // test1
+  "0xae960fa5229db90daf10d5e0fb7ae69292d40fc5", // test2
+  "0x0418dc095eed888d2370fe2b0018bcf54615697e", // test3
+  "0xd2097f2bd5031c8275ce33b7f5f0a6d9a44562a6", // test4
+  "0x5b85e9debfa4e3b568ff4cbd55f0d9bb8a4fc61f", // test5
 ]);
 
 function resolveTrainingBattle(player: Agent): boolean {
@@ -99,6 +112,7 @@ export default function ArenaPage() {
     address: agentNftAddress,
     abi: agentNftAbi,
     functionName: "getAllAgentIds",
+    query: QUERY_CONFIG,
   });
 
   // Load my agent IDs
@@ -107,7 +121,7 @@ export default function ArenaPage() {
     abi: agentNftAbi,
     functionName: "getOwnerAgents",
     args: address ? [address] : undefined,
-    query: { enabled: !!address },
+    query: { ...QUERY_CONFIG, enabled: !!address },
   });
 
   // Load all battles
@@ -115,6 +129,7 @@ export default function ArenaPage() {
     address: battleArenaAddress,
     abi: battleArenaAbi,
     functionName: "getAllBattleIds",
+    query: QUERY_CONFIG,
   });
 
   // Fetch narrative after battle confirmed
@@ -321,6 +336,7 @@ export default function ArenaPage() {
           selectedId={opponentAgentId}
           onSelect={setOpponentAgentId}
           emptyMessage="No other agents yet. Invite friends!"
+          excludeOwners={TEST_ADDRESSES}
         >
           <div className="flex gap-3">
             <button
@@ -387,7 +403,7 @@ function ClashScreen({
     abi: agentNftAbi,
     functionName: "getAgent",
     args: myAgentId ? [myAgentId] : undefined,
-    query: { enabled: !!myAgentId },
+    query: { ...QUERY_CONFIG, enabled: !!myAgentId },
   }) as { data: Agent | undefined };
 
   const { data: oppAgent } = useReadContract({
@@ -395,7 +411,7 @@ function ClashScreen({
     abi: agentNftAbi,
     functionName: "getAgent",
     args: opponentAgentId ? [opponentAgentId] : undefined,
-    query: { enabled: !!opponentAgentId },
+    query: { ...QUERY_CONFIG, enabled: !!opponentAgentId },
   }) as { data: Agent | undefined };
 
   const isClash = phase === "clash";
@@ -452,6 +468,7 @@ function BattleResultScreen({
     abi: battleArenaAbi,
     functionName: "getBattle",
     args: [battleId],
+    query: QUERY_CONFIG,
   }) as { data: Battle | undefined };
 
   const { data: winnerAgent } = useReadContract({
@@ -459,7 +476,7 @@ function BattleResultScreen({
     abi: agentNftAbi,
     functionName: "getAgent",
     args: battle?.winnerAgentId ? [battle.winnerAgentId] : undefined,
-    query: { enabled: !!battle?.winnerAgentId },
+    query: { ...QUERY_CONFIG, enabled: !!battle?.winnerAgentId },
   }) as { data: Agent | undefined };
 
   const { data: challengerAgent } = useReadContract({
@@ -467,7 +484,7 @@ function BattleResultScreen({
     abi: agentNftAbi,
     functionName: "getAgent",
     args: battle?.challengerAgentId ? [battle.challengerAgentId] : undefined,
-    query: { enabled: !!battle },
+    query: { ...QUERY_CONFIG, enabled: !!battle },
   }) as { data: Agent | undefined };
 
   const { data: challengedAgent } = useReadContract({
@@ -475,7 +492,7 @@ function BattleResultScreen({
     abi: agentNftAbi,
     functionName: "getAgent",
     args: battle?.challengedAgentId ? [battle.challengedAgentId] : undefined,
-    query: { enabled: !!battle },
+    query: { ...QUERY_CONFIG, enabled: !!battle },
   }) as { data: Agent | undefined };
 
   const loserAgent =
@@ -565,6 +582,7 @@ function AgentSelector({
   onSelect,
   emptyMessage,
   children,
+  excludeOwners,
 }: {
   title: string;
   agentIds?: bigint[];
@@ -572,6 +590,7 @@ function AgentSelector({
   onSelect: (id: bigint) => void;
   emptyMessage: React.ReactNode;
   children?: React.ReactNode;
+  excludeOwners?: Set<string>;
 }) {
   const { agentNftAddress, agentNftAbi } = useContracts();
 
@@ -583,7 +602,7 @@ function AgentSelector({
       functionName: "getAgent" as const,
       args: [id] as [bigint],
     })),
-    query: { enabled: !!agentIds && agentIds.length > 0 },
+    query: { ...QUERY_CONFIG, enabled: !!agentIds && agentIds.length > 0 },
   });
 
   return (
@@ -605,6 +624,8 @@ function AgentSelector({
                 </div>
               );
             }
+            // Hide agents owned by excluded (test/deployer) addresses
+            if (excludeOwners?.has(agent.owner.toLowerCase())) return null;
             return (
               <AgentCard
                 key={id.toString()}
@@ -649,7 +670,7 @@ function PendingChallenges({
       functionName: "getBattle" as const,
       args: [id] as [bigint],
     })),
-    query: { enabled: recentBattleIds.length > 0 },
+    query: { ...QUERY_CONFIG, enabled: recentBattleIds.length > 0 },
   });
 
   const battles = useMemo(
@@ -678,7 +699,7 @@ function PendingChallenges({
       functionName: "getAgent" as const,
       args: [id] as [bigint],
     })),
-    query: { enabled: agentIdsNeeded.length > 0 },
+    query: { ...QUERY_CONFIG, enabled: agentIdsNeeded.length > 0 },
   });
 
   const agentMap = useMemo(() => {
