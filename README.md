@@ -91,3 +91,4 @@ Monad's parallel execution and sub-second finality makes **atomic battles** feel
 
 
 trigger redeploy
+trigger
