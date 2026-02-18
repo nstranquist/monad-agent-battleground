@@ -23,7 +23,6 @@ contract AgentNFT is ERC721 {
         uint8 strength;      // min 1, sum of str+spd+int == 10
         uint8 speed;
         uint8 intelligence;
-        string personalityPrompt; // max 200 chars, used by Claude for narratives
         uint256 wins;
         uint256 losses;
         uint256 createdAt;
@@ -47,7 +46,8 @@ contract AgentNFT is ERC721 {
         string name,
         uint8 str,
         uint8 spd,
-        uint8 intel
+        uint8 intel,
+        string personality
     );
     event PersonalityUpdated(uint256 indexed tokenId, string prompt);
     event RecordUpdated(uint256 indexed tokenId, uint256 wins, uint256 losses);
@@ -73,6 +73,7 @@ contract AgentNFT is ERC721 {
     // -------------------------------------------------------------------------
 
     /// @notice Mint your soulbound agent champion. Stats must sum to exactly 10.
+    /// @dev personalityPrompt is emitted as an event only — not stored on-chain to save gas.
     function mint(
         string calldata name,
         uint8 strength,
@@ -96,7 +97,6 @@ contract AgentNFT is ERC721 {
             strength: strength,
             speed: speed,
             intelligence: intelligence,
-            personalityPrompt: personalityPrompt,
             wins: 0,
             losses: 0,
             createdAt: block.timestamp,
@@ -107,19 +107,18 @@ contract AgentNFT is ERC721 {
         _allAgentIds.push(tokenId);
 
         _safeMint(msg.sender, tokenId);
-        emit AgentMinted(tokenId, msg.sender, name, strength, speed, intelligence);
+        emit AgentMinted(tokenId, msg.sender, name, strength, speed, intelligence, personalityPrompt);
     }
 
     // -------------------------------------------------------------------------
     // Customization
     // -------------------------------------------------------------------------
 
-    /// @notice Update your agent's personality prompt. Affects Claude narrative generation.
+    /// @notice Update your agent's personality prompt. Emitted as event only — not stored on-chain.
     function updatePersonality(uint256 tokenId, string calldata prompt) external {
         require(_agents[tokenId].exists, "Agent not found");
         require(_agents[tokenId].owner == msg.sender, "Not your agent");
         require(bytes(prompt).length <= 200, "Max 200 chars");
-        _agents[tokenId].personalityPrompt = prompt;
         emit PersonalityUpdated(tokenId, prompt);
     }
 
@@ -169,9 +168,6 @@ contract AgentNFT is ERC721 {
 
         string memory agentClass = _getClass(a.strength, a.speed, a.intelligence);
         string memory svg = _buildSVG(a, agentClass);
-        string memory personality = bytes(a.personalityPrompt).length > 0
-            ? a.personalityPrompt
-            : "No personality set.";
 
         string memory json = Base64.encode(
             bytes(
@@ -184,9 +180,7 @@ contract AgentNFT is ERC721 {
                     a.wins.toString(),
                     'W-',
                     a.losses.toString(),
-                    'L. Personality: ',
-                    personality,
-                    '","image":"data:image/svg+xml;base64,',
+                    'L.","image":"data:image/svg+xml;base64,',
                     Base64.encode(bytes(svg)),
                     '","attributes":[',
                     '{"trait_type":"Strength","value":',
@@ -218,9 +212,6 @@ contract AgentNFT is ERC721 {
         uint256 strW = uint256(a.strength) * 16;
         uint256 spdW = uint256(a.speed) * 16;
         uint256 intW = uint256(a.intelligence) * 16;
-
-        // Personality truncated to ~32 chars for display
-        string memory personality = _truncate(a.personalityPrompt, 32);
 
         // Win rate label
         uint256 total = a.wins + a.losses;
@@ -289,16 +280,9 @@ contract AgentNFT is ERC721 {
             '<text x="230" y="252" font-family="monospace,Courier" font-size="13" fill="#836EF9">', wrLabel, '</text>',
             // Divider
             '<line x1="18" y1="268" x2="282" y2="268" stroke="#2A2A3A" stroke-width="1"/>',
-            // PERSONALITY
-            '<text x="18" y="286" font-family="monospace,Courier" font-size="9" fill="#555" letter-spacing="3">PERSONALITY</text>',
-            '<text x="18" y="306" font-family="monospace,Courier" font-size="10" fill="#A89BF5" font-style="italic">"',
-            personality,
-            '"</text>',
-            // Divider
-            '<line x1="18" y1="326" x2="282" y2="326" stroke="#2A2A3A" stroke-width="1"/>',
             // Footer
-            '<text x="18" y="346" font-family="monospace,Courier" font-size="8" fill="#444">SOULBOUND - MONAD TESTNET</text>',
-            '<text x="18" y="362" font-family="monospace,Courier" font-size="8" fill="#444">AGENT BATTLE ARENA - CHAIN 10143</text>',
+            '<text x="18" y="288" font-family="monospace,Courier" font-size="8" fill="#444">SOULBOUND - MONAD TESTNET</text>',
+            '<text x="18" y="304" font-family="monospace,Courier" font-size="8" fill="#444">AGENT BATTLE ARENA - CHAIN 10143</text>',
             // Glow effect
             '<rect x="1" y="1" width="298" height="418" fill="none" stroke="#836EF9" stroke-width="0.5" rx="13" opacity="0.3"/>',
             '</svg>'

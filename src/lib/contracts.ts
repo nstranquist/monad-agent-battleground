@@ -73,7 +73,6 @@ export const AGENT_NFT_ABI = [
           { name: "strength", type: "uint8" },
           { name: "speed", type: "uint8" },
           { name: "intelligence", type: "uint8" },
-          { name: "personalityPrompt", type: "string" },
           { name: "wins", type: "uint256" },
           { name: "losses", type: "uint256" },
           { name: "createdAt", type: "uint256" },
@@ -121,6 +120,7 @@ export const AGENT_NFT_ABI = [
       { name: "str", type: "uint8", indexed: false },
       { name: "spd", type: "uint8", indexed: false },
       { name: "intel", type: "uint8", indexed: false },
+      { name: "personality", type: "string", indexed: false },
     ],
   },
   {

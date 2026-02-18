@@ -32,7 +32,7 @@ const TRAINER_BOT: Agent = {
   strength: 3,
   speed: 3,
   intelligence: 4,
-  personalityPrompt: "I exist to train you. Every warrior needs sparring.",
+  personalityPrompt: "A battle simulation bot. No mercy in training.",
   wins: 999n,
   losses: 0n,
   createdAt: 0n,

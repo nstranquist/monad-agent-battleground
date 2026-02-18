@@ -58,8 +58,8 @@ export async function POST(req: NextRequest) {
       publicClient.readContract({ address: AGENT_NFT_ADDRESS, abi: AGENT_NFT_ABI, functionName: "getAgent", args: [battle.challengerAgentId] }),
       publicClient.readContract({ address: AGENT_NFT_ADDRESS, abi: AGENT_NFT_ABI, functionName: "getAgent", args: [battle.challengedAgentId] }),
     ])) as [
-      { name: string; strength: number; speed: number; intelligence: number; personalityPrompt: string; wins: bigint; losses: bigint },
-      { name: string; strength: number; speed: number; intelligence: number; personalityPrompt: string; wins: bigint; losses: bigint }
+      { name: string; strength: number; speed: number; intelligence: number; personalityPrompt?: string; wins: bigint; losses: bigint },
+      { name: string; strength: number; speed: number; intelligence: number; personalityPrompt?: string; wins: bigint; losses: bigint }
     ];
 
     const winnerIsA = battle.winnerAgentId === battle.challengerAgentId;
