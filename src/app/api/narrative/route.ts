@@ -9,9 +9,9 @@ import {
   BATTLE_ARENA_ABI,
 } from "@/lib/contracts";
 
-// In-memory rate limiter: 10 requests per IP per minute
+// In-memory rate limiter: 100 requests per IP per minute (generous for demo)
 const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
-const RATE_LIMIT = 10;
+const RATE_LIMIT = 100;
 const WINDOW_MS = 60_000;
 
 function checkRateLimit(ip: string): boolean {

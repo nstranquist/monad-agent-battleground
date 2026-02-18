@@ -9,7 +9,9 @@
     "compile": "TS_NODE_PROJECT=tsconfig.hardhat.json hardhat compile",
     "deploy:testnet": "TS_NODE_PROJECT=tsconfig.hardhat.json hardhat run scripts/deploy.ts --network monad",
     "deploy:mainnet": "TS_NODE_PROJECT=tsconfig.hardhat.json hardhat run scripts/deploy.ts --network monadMainnet",
-    "test:contracts": "TS_NODE_PROJECT=tsconfig.hardhat.json hardhat test"
+    "test:contracts": "TS_NODE_PROJECT=tsconfig.hardhat.json hardhat test",
+    "link": "TS_NODE_PROJECT=tsconfig.hardhat.json hardhat run scripts/link.ts --network monad",
+    "simulate": "TS_NODE_PROJECT=tsconfig.hardhat.json hardhat run scripts/simulate.ts --network monad"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.36.0",

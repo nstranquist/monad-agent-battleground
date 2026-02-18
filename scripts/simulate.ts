@@ -1,11 +1,9 @@
 /**
- * simulate.ts — Spin up test wallets, mint agents, run battles on Monad testnet.
+ * simulate.ts — Deployer mints all agents, runs battles onchain.
+ * Using a single deployer signer avoids hardhat-ethers random-wallet signer bugs.
  *
  * Usage:
- *   npx hardhat run scripts/simulate.ts --network monad
- *
- * Requires DEPLOYER_PRIVATE_KEY in .env.local with enough MON to fund wallets.
- * Each test wallet needs ~0.01 MON (gas + stakes).
+ *   npm run simulate
  */
 
 import { ethers } from "hardhat";
@@ -34,97 +32,84 @@ async function main() {
   console.log("Balance:", ethers.formatEther(await provider.getBalance(deployer.address)), "MON\n");
 
   // --- Attach to deployed contracts ---
-  const nftAddress    = process.env.NEXT_PUBLIC_AGENT_NFT_ADDRESS || process.env.NEXT_PUBLIC_AGENT_REGISTRY_ADDRESS;
-  const arenaAddress  = process.env.NEXT_PUBLIC_BATTLE_ARENA_ADDRESS;
+  const nftAddress   = process.env.NEXT_PUBLIC_AGENT_NFT_ADDRESS || process.env.NEXT_PUBLIC_AGENT_REGISTRY_ADDRESS;
+  const arenaAddress = process.env.NEXT_PUBLIC_BATTLE_ARENA_ADDRESS;
 
   if (!nftAddress || !arenaAddress) {
     console.error("❌ Contract addresses not set. Run `npm run deploy:testnet` first.");
     process.exit(1);
   }
 
-  const nft   = await ethers.getContractAt("AgentNFT",    nftAddress);
-  const arena = await ethers.getContractAt("BattleArena", arenaAddress);
+  const nft   = await ethers.getContractAt("AgentNFT",    nftAddress,    deployer);
+  const arena = await ethers.getContractAt("BattleArena", arenaAddress,  deployer);
   const stake = await arena.BATTLE_STAKE();
 
   console.log("AgentNFT:   ", nftAddress);
   console.log("BattleArena:", arenaAddress);
   console.log("Stake:      ", ethers.formatEther(stake), "MON per side\n");
 
-  // --- Create test wallets ---
-  console.log("Creating", BUILDS.length, "test wallets...");
-  const wallets = BUILDS.map(() => ethers.Wallet.createRandom().connect(provider));
-
-  // Fund each wallet from deployer
-  const fundAmount = ethers.parseEther("0.02"); // 0.02 MON each (gas + 10 battles)
-  for (const wallet of wallets) {
-    const tx = await deployer.sendTransaction({ to: wallet.address, value: fundAmount });
-    await tx.wait();
-    console.log("  Funded:", wallet.address, "→", ethers.formatEther(fundAmount), "MON");
+  // Verify link
+  const linkedArena = await nft.battleArena();
+  if (linkedArena.toLowerCase() !== arenaAddress.toLowerCase()) {
+    console.error("❌ AgentNFT is not linked to BattleArena. Run `npm run link` first.");
+    console.error("   battleArena() =", linkedArena);
+    process.exit(1);
   }
-  console.log();
+  console.log("✅ Contracts linked\n");
 
-  // --- Mint agents ---
-  console.log("Minting agents...");
+  // --- Mint agents (deployer is signer → deployer owns all agents) ---
+  console.log("Minting", BUILDS.length, "agents from deployer...");
   const agentIds: bigint[] = [];
   for (let i = 0; i < BUILDS.length; i++) {
     const { name, str, spd, int: intel } = BUILDS[i];
-    const wallet = wallets[i];
-    const nftConnected = nft.connect(wallet) as typeof nft;
-    const tx = await nftConnected.mint(
-      name,
-      str,
-      spd,
-      intel,
-      PERSONALITIES[i]
-    );
+    const tx = await nft.mint(name, str, spd, intel, PERSONALITIES[i]);
     const receipt = await tx.wait();
-    // Parse AgentMinted event
     const event = receipt?.logs
       .map((log) => { try { return nft.interface.parseLog(log); } catch { return null; } })
       .find((e) => e?.name === "AgentMinted");
-    const tokenId: bigint = event?.args?.tokenId ?? BigInt(i + 1);
+    if (!event) throw new Error(`AgentMinted event not found for ${name}`);
+    const tokenId: bigint = event.args.tokenId;
     agentIds.push(tokenId);
     console.log(`  Minted: ${name} (token #${tokenId}) STR${str}/SPD${spd}/INT${intel}`);
   }
   console.log();
 
-  // --- Run battles ---
+  // --- Run battles (deployer owns all agents → can challenge + accept) ---
   const battles = [
     [0, 1], [1, 2], [2, 3], [3, 4], [4, 0],
     [0, 2], [1, 3],
   ];
 
   console.log("Running", battles.length, "battles...\n");
-  let wins: Record<string, number> = {};
+  const wins: Record<string, number> = {};
   BUILDS.forEach((b) => (wins[b.name] = 0));
 
+  let battleNum = 0;
   for (const [aIdx, bIdx] of battles) {
-    const walletA = wallets[aIdx];
-    const walletB = wallets[bIdx];
-    const agentA  = agentIds[aIdx];
-    const agentB  = agentIds[bIdx];
-    const nameA   = BUILDS[aIdx].name;
-    const nameB   = BUILDS[bIdx].name;
+    battleNum++;
+    const agentA = agentIds[aIdx];
+    const agentB = agentIds[bIdx];
+    const nameA  = BUILDS[aIdx].name;
+    const nameB  = BUILDS[bIdx].name;
 
-    // A challenges B
-    const arenaA = arena.connect(walletA) as typeof arena;
-    const arenaB = arena.connect(walletB) as typeof arena;
-
-    const challengeTx = await arenaA.challenge(agentA, agentB, { value: stake });
+    // Challenge
+    const challengeTx = await arena.challenge(agentA, agentB, { value: stake });
     const challengeReceipt = await challengeTx.wait();
     const battleEvent = challengeReceipt?.logs
       .map((log) => { try { return arena.interface.parseLog(log); } catch { return null; } })
       .find((e) => e?.name === "BattleCreated");
-    const battleId: bigint = battleEvent?.args?.battleId ?? BigInt(0);
+    if (!battleEvent) throw new Error(`BattleCreated event not found for battle ${battleNum}`);
+    const battleId: bigint = battleEvent.args.battleId;
 
-    // B accepts
-    const acceptTx = await arenaB.acceptChallenge(battleId, { value: stake });
+    // Accept (deployer also owns the challenged agent → valid)
+    const acceptTx = await arena.acceptChallenge(battleId, { value: stake });
     const acceptReceipt = await acceptTx.wait();
     const resolveEvent = acceptReceipt?.logs
       .map((log) => { try { return arena.interface.parseLog(log); } catch { return null; } })
       .find((e) => e?.name === "BattleResolved");
+    if (!resolveEvent) throw new Error(`BattleResolved event not found for battle ${battleNum}`);
 
-    const winnerAgentId: bigint = resolveEvent?.args?.winnerAgentId ?? BigInt(0);
+    const winnerAgentId: bigint = resolveEvent.args.winnerAgentId;
     const winnerName = winnerAgentId === agentA ? nameA : nameB;
     const loserName  = winnerAgentId === agentA ? nameB : nameA;
     wins[winnerName] = (wins[winnerName] || 0) + 1;
@@ -136,11 +121,15 @@ async function main() {
   console.log("\n📊 Final Standings:");
   const standings = Object.entries(wins).sort((a, b) => b[1] - a[1]);
   for (const [name, w] of standings) {
-    const agent = await nft.getAgent(agentIds[BUILDS.findIndex((b) => b.name === name)]);
-    console.log(`  ${name.padEnd(14)} ${w}W-${agent.losses}L  (${BUILDS.find(b=>b.name===name)?.str}/${BUILDS.find(b=>b.name===name)?.spd}/${BUILDS.find(b=>b.name===name)?.int} STR/SPD/INT)`);
+    const idx   = BUILDS.findIndex((b) => b.name === name);
+    const agent = await nft.getAgent(agentIds[idx]);
+    const build = BUILDS[idx];
+    console.log(`  ${name.padEnd(14)} ${w}W-${agent.losses}L  (${build.str}/${build.spd}/${build.int} STR/SPD/INT)`);
   }
 
-  console.log("\n✅ Simulation complete. Check", arenaAddress, "on the explorer.");
+  const endBal = await provider.getBalance(deployer.address);
+  console.log("\n✅ Simulation complete! Check", arenaAddress, "on the explorer.");
+  console.log("   Deployer balance remaining:", ethers.formatEther(endBal), "MON");
 }
 
 main().catch((e) => {
