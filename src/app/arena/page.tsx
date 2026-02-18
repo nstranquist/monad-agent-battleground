@@ -23,7 +23,56 @@ const BattleArena3D = dynamic(
   }
 );
 
-type Step = "select-my-agent" | "select-opponent" | "battling" | "battle-result";
+// ── Training mode ─────────────────────────────────────────────────────────────
+
+const TRAINER_BOT: Agent = {
+  id: 0n,
+  name: "TRAINER BOT",
+  owner: "0x0000000000000000000000000000000000000000" as `0x${string}`,
+  strength: 3,
+  speed: 3,
+  intelligence: 4,
+  personalityPrompt: "I exist to train you. Every warrior needs sparring.",
+  wins: 999n,
+  losses: 0n,
+  createdAt: 0n,
+  exists: true,
+};
+
+// Agents owned by these addresses are hidden from the opponent picker
+// (simulation / deployer test wallets that pollute the UI for real users)
+const TEST_ADDRESSES = new Set([
+  "0x87c1a9281abcb1b894792b49b4ff7b95de667201",
+]);
+
+function resolveTrainingBattle(player: Agent): boolean {
+  const seed = Date.now();
+  const s1 = (seed % 10) + 1;
+  const s2 = ((seed >>> 5) % 10) + 1;
+  const s3 = ((seed >>> 10) % 10) + 1;
+  const ps = player.strength * s1 + player.speed * s2 + player.intelligence * s3;
+  const ts = TRAINER_BOT.strength * s1 + TRAINER_BOT.speed * s2 + TRAINER_BOT.intelligence * s3;
+  return ps >= ts;
+}
+
+const TRAIN_WIN = [
+  "{p} faced TRAINER BOT in the sim ring and won decisively. No MON at stake, no record on-chain — but the form was immaculate. The real arena should fear what's coming.",
+  "TRAINER BOT pushed {p} through brutal exchanges, but the challenger's stats won out. Clean training victory. Time to take that energy to a real battle.",
+  "{p} read every move TRAINER BOT had and countered perfectly. Off-chain, off-record — but completely on point. The Monad arena awaits.",
+];
+const TRAIN_LOSS = [
+  "TRAINER BOT out-pointed {p} in the simulation. No MON lost, no record dinged — just a signal to sharpen the strategy before the real arena.",
+  "{p} fought hard but TRAINER BOT exploited the stat gaps. Training round complete. Lesson noted.",
+  "The drill ended with {p} on the back foot. Adjust the personality, rethink the build, then challenge someone for real MON.",
+];
+function makeTrainingNarrative(name: string, won: boolean): string {
+  const pool = won ? TRAIN_WIN : TRAIN_LOSS;
+  return pool[Math.floor(Math.random() * pool.length)].replace(/\{p\}/g, name);
+}
+
+// ── Step type ─────────────────────────────────────────────────────────────────
+
+type Step = "select-my-agent" | "select-opponent" | "battling" | "battle-result" | "training" | "training-result";
 
 export default function ArenaPage() {
   const { address, isConnected } = useAccount();
