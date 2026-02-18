@@ -23,6 +23,7 @@ export default function CreateAgentPage() {
   const [stats, setStats] = useState({ strength: 4, speed: 3, intelligence: 3 });
   const [personality, setPersonality] = useState("");
   const [txHash, setTxHash] = useState<`0x${string}` | null>(null);
+  const [txError, setTxError] = useState<string | null>(null);
 
   const { writeContractAsync, isPending } = useWriteContract();
   const { isLoading: isConfirming, isSuccess } =
@@ -39,6 +40,7 @@ export default function CreateAgentPage() {
 
   const handleCreate = async () => {
     if (!name.trim() || remaining !== 0) return;
+    setTxError(null);
     try {
       const hash = await writeContractAsync({
         address: agentNftAddress,
@@ -53,7 +55,13 @@ export default function CreateAgentPage() {
         ],
       });
       setTxHash(hash);
-    } catch (e) {
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg.includes("User rejected") || msg.includes("user rejected")) {
+        setTxError("Transaction cancelled.");
+      } else {
+        setTxError("Transaction failed. Check your wallet and try again.");
+      }
       console.error(e);
     }
   };
@@ -197,6 +205,12 @@ export default function CreateAgentPage() {
       >
         {isPending ? "Confirm in Phantom..." : isConfirming ? "⏳ Minting on Monad..." : "Mint Champion →"}
       </button>
+
+      {txError && (
+        <div className="text-sm text-red-400 text-center border border-red-500/30 rounded p-3">
+          {txError}
+        </div>
+      )}
 
       {!agentNftAddress && (
         <div className="text-xs text-yellow-500 text-center border border-yellow-500/30 rounded p-3">

@@ -28,7 +28,10 @@ function checkRateLimit(ip: string): boolean {
 
 const publicClient = createPublicClient({
   chain: monadTestnet,
-  transport: http(),
+  transport: http(
+    process.env.DRPC_MONAD_TESTNET_URL ||
+    "https://lb.drpc.live/monad-testnet/AmbwnCrPI0c2nb3_DZivVy6GqQ7XDGUR8bLFcs5opQTS"
+  ),
 });
 
 const FALLBACK =

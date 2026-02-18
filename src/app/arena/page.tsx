@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import dynamic from "next/dynamic";
-import { useAccount, useReadContract, useWriteContract, useWaitForTransactionReceipt } from "wagmi";
+import { useAccount, useReadContract, useReadContracts, useWriteContract, useWaitForTransactionReceipt } from "wagmi";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { formatEther } from "viem";
 import { useContracts } from "@/hooks/useContracts";
@@ -87,6 +87,7 @@ export default function ArenaPage() {
   const [txHash, setTxHash] = useState<`0x${string}` | null>(null);
   const [resolvedBattleId, setResolvedBattleId] = useState<bigint | null>(null);
   const [clashPhase, setClashPhase] = useState<BattlePhase>("idle");
+  const [txError, setTxError] = useState<string | null>(null);
 
   const { writeContractAsync, isPending } = useWriteContract();
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({
@@ -160,6 +161,7 @@ export default function ArenaPage() {
 
   const handleChallenge = async () => {
     if (!myAgentId || !opponentAgentId) return;
+    setTxError(null);
     try {
       const hash = await writeContractAsync({
         address: battleArenaAddress,
@@ -169,13 +171,20 @@ export default function ArenaPage() {
         value: battleStake,
       });
       setTxHash(hash);
-      setBattleId(null); // will be resolved from contract
-    } catch (e) {
+      setBattleId(null);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg.includes("User rejected") || msg.includes("user rejected")) {
+        setTxError("Transaction cancelled.");
+      } else {
+        setTxError("Transaction failed. Check your wallet balance and try again.");
+      }
       console.error(e);
     }
   };
 
   const handleAcceptChallenge = async (bid: bigint) => {
+    setTxError(null);
     try {
       const hash = await writeContractAsync({
         address: battleArenaAddress,
@@ -186,7 +195,13 @@ export default function ArenaPage() {
       });
       setTxHash(hash);
       setPendingBattleId(bid);
-    } catch (e) {
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg.includes("User rejected") || msg.includes("user rejected")) {
+        setTxError("Transaction cancelled.");
+      } else {
+        setTxError("Transaction failed. Check your wallet balance and try again.");
+      }
       console.error(e);
     }
   };
@@ -327,6 +342,12 @@ export default function ArenaPage() {
             </button>
           </div>
         </AgentSelector>
+      )}
+
+      {txError && (
+        <div className="text-sm text-red-400 text-center border border-red-500/30 rounded p-3">
+          {txError}
+        </div>
       )}
 
       {/* Pending Challenges */}
@@ -552,6 +573,19 @@ function AgentSelector({
   emptyMessage: React.ReactNode;
   children?: React.ReactNode;
 }) {
+  const { agentNftAddress, agentNftAbi } = useContracts();
+
+  // Batch-load all agents in a single multicall instead of N individual calls
+  const { data: agentResults } = useReadContracts({
+    contracts: (agentIds ?? []).map((id) => ({
+      address: agentNftAddress,
+      abi: agentNftAbi,
+      functionName: "getAgent" as const,
+      args: [id] as [bigint],
+    })),
+    query: { enabled: !!agentIds && agentIds.length > 0 },
+  });
+
   return (
     <div className="space-y-4">
       <h2 className="text-xl font-bold">{title}</h2>
@@ -561,53 +595,29 @@ function AgentSelector({
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {agentIds.map((id) => (
-            <AgentCardLoader
-              key={id.toString()}
-              agentId={id}
-              selected={selectedId === id}
-              onClick={() => onSelect(id)}
-            />
-          ))}
+          {agentIds.map((id, i) => {
+            const agent = agentResults?.[i]?.result as Agent | undefined;
+            if (!agent) {
+              return (
+                <div key={id.toString()} className="border border-monad-border rounded-lg p-4 animate-pulse bg-monad-card">
+                  <div className="h-4 bg-monad-border rounded w-3/4 mb-2" />
+                  <div className="h-3 bg-monad-border rounded w-1/2" />
+                </div>
+              );
+            }
+            return (
+              <AgentCard
+                key={id.toString()}
+                agent={agent}
+                selected={selectedId === id}
+                onClick={() => onSelect(id)}
+              />
+            );
+          })}
         </div>
       )}
       {children && <div className="pt-2">{children}</div>}
     </div>
-  );
-}
-
-function AgentCardLoader({
-  agentId,
-  selected,
-  onClick,
-}: {
-  agentId: bigint;
-  selected?: boolean;
-  onClick?: () => void;
-}) {
-  const { agentNftAddress, agentNftAbi } = useContracts();
-  const { data: agent } = useReadContract({
-    address: agentNftAddress,
-    abi: agentNftAbi,
-    functionName: "getAgent",
-    args: [agentId],
-  });
-
-  if (!agent) {
-    return (
-      <div className="border border-monad-border rounded-lg p-4 animate-pulse bg-monad-card">
-        <div className="h-4 bg-monad-border rounded w-3/4 mb-2" />
-        <div className="h-3 bg-monad-border rounded w-1/2" />
-      </div>
-    );
-  }
-
-  return (
-    <AgentCard
-      agent={agent as Agent}
-      selected={selected}
-      onClick={onClick}
-    />
   );
 }
 
@@ -628,107 +638,109 @@ function PendingChallenges({
   isPending: boolean;
   isConfirming: boolean;
 }) {
-  if (!allBattleIds || allBattleIds.length === 0 || !myAgentIds || myAgentIds.length === 0) return null;
+  const { agentNftAddress, agentNftAbi, battleArenaAddress, battleArenaAbi } = useContracts();
+  const recentBattleIds = useMemo(() => allBattleIds?.slice(-50) ?? [], [allBattleIds]);
+
+  // Batch-load all battles in one multicall
+  const { data: battleResults } = useReadContracts({
+    contracts: recentBattleIds.map((id) => ({
+      address: battleArenaAddress,
+      abi: battleArenaAbi,
+      functionName: "getBattle" as const,
+      args: [id] as [bigint],
+    })),
+    query: { enabled: recentBattleIds.length > 0 },
+  });
+
+  const battles = useMemo(
+    () => battleResults?.map((r) => r.result as Battle | undefined) ?? [],
+    [battleResults]
+  );
+
+  // Collect unique agent IDs only from pending battles where my agent is challenged
+  const agentIdsNeeded = useMemo(() => {
+    if (!myAgentIds) return [];
+    const ids = new Set<bigint>();
+    battles.forEach((b) => {
+      if (!b || b.status !== 0) return;
+      if (!myAgentIds.includes(b.challengedAgentId)) return;
+      ids.add(b.challengerAgentId);
+      ids.add(b.challengedAgentId);
+    });
+    return Array.from(ids);
+  }, [battles, myAgentIds]);
+
+  // Batch-load those agents in one multicall
+  const { data: agentResults } = useReadContracts({
+    contracts: agentIdsNeeded.map((id) => ({
+      address: agentNftAddress,
+      abi: agentNftAbi,
+      functionName: "getAgent" as const,
+      args: [id] as [bigint],
+    })),
+    query: { enabled: agentIdsNeeded.length > 0 },
+  });
+
+  const agentMap = useMemo(() => {
+    const m = new Map<bigint, Agent>();
+    agentIdsNeeded.forEach((id, i) => {
+      const a = agentResults?.[i]?.result as Agent | undefined;
+      if (a) m.set(id, a);
+    });
+    return m;
+  }, [agentIdsNeeded, agentResults]);
+
+  const pendingRows = useMemo(
+    () =>
+      recentBattleIds.reduce<Array<{ id: bigint; battle: Battle }>>((acc, id, i) => {
+        const b = battles[i];
+        if (!b || b.status !== 0) return acc;
+        if (!myAgentIds?.includes(b.challengedAgentId)) return acc;
+        acc.push({ id, battle: b });
+        return acc;
+      }, []),
+    [recentBattleIds, battles, myAgentIds]
+  );
+
+  if (!pendingRows.length) return null;
 
   return (
     <div className="space-y-4">
       <h2 className="text-xl font-bold">Pending Challenges</h2>
       <div className="space-y-2">
-        {allBattleIds.slice(-50).map((id) => (
-          <BattleRow
-            key={id.toString()}
-            battleId={id}
-            myAgentIds={myAgentIds}
-            onAccept={onAccept}
-            isPending={isPending}
-            isConfirming={isConfirming}
-          />
-        ))}
-      </div>
-    </div>
-  );
-}
+        {pendingRows.map(({ id, battle }) => {
+          const challengerAgent = agentMap.get(battle.challengerAgentId);
+          const challengedAgent = agentMap.get(battle.challengedAgentId);
+          if (!challengerAgent || !challengedAgent) return null;
 
-function BattleRow({
-  battleId,
-  myAgentIds,
-  onAccept,
-  isPending,
-  isConfirming,
-}: {
-  battleId: bigint;
-  myAgentIds?: bigint[];
-  onAccept: (id: bigint) => void;
-  isPending: boolean;
-  isConfirming: boolean;
-}) {
-  const { agentNftAddress, agentNftAbi, battleArenaAddress, battleArenaAbi } = useContracts();
-  const { data: battle } = useReadContract({
-    address: battleArenaAddress,
-    abi: battleArenaAbi,
-    functionName: "getBattle",
-    args: [battleId],
-  }) as { data: Battle | undefined };
-
-  const { data: challengerAgent } = useReadContract({
-    address: agentNftAddress,
-    abi: agentNftAbi,
-    functionName: "getAgent",
-    args: battle ? [battle.challengerAgentId] : undefined,
-    query: { enabled: !!battle },
-  });
-
-  const { data: challengedAgent } = useReadContract({
-    address: agentNftAddress,
-    abi: agentNftAbi,
-    functionName: "getAgent",
-    args: battle ? [battle.challengedAgentId] : undefined,
-    query: { enabled: !!battle },
-  });
-
-  if (!battle || !challengerAgent || !challengedAgent) return null;
-
-  const isMyChallengedAgent = myAgentIds?.includes(battle.challengedAgentId);
-
-  // Only show pending challenges where one of my agents is being challenged
-  if (battle.status !== 0 || !isMyChallengedAgent) return null;
-
-  const statusLabel = ["Pending ⏳", "Completed ✅", "Cancelled ❌"][battle.status];
-  const winnerName =
-    (battle.status as number) === 1 && battle.winnerAgentId
-      ? battle.winnerAgentId === battle.challengerAgentId
-        ? (challengerAgent as Agent).name
-        : (challengedAgent as Agent).name
-      : null;
-
-  return (
-    <div className="bg-monad-card border border-monad-border rounded-lg p-4 flex items-center justify-between gap-4">
-      <div className="flex items-center gap-3 flex-1 min-w-0">
-        <span className="text-monad-purple font-bold text-sm whitespace-nowrap">
-          #{battleId.toString()}
-        </span>
-        <div className="flex items-center gap-2 flex-1 min-w-0 text-sm">
-          <span className="text-white truncate">{(challengerAgent as Agent).name}</span>
-          <span className="text-gray-500">vs</span>
-          <span className="text-white truncate">{(challengedAgent as Agent).name}</span>
-        </div>
-      </div>
-      <div className="flex items-center gap-3">
-        {winnerName && (
-          <span className="text-green-400 text-xs font-bold whitespace-nowrap">
-            🏆 {winnerName}
-          </span>
-        )}
-        <span className="text-xs text-gray-500 whitespace-nowrap">{statusLabel}</span>
-        {battle.status === 0 && isMyChallengedAgent && (
-          <button
-            onClick={() => onAccept(battleId)}
-            disabled={isPending || isConfirming}
-            className="px-3 py-1.5 bg-monad-purple hover:bg-monad-purple/80 disabled:bg-gray-700 text-white text-xs font-bold rounded whitespace-nowrap"
-          >
-            {isPending || isConfirming ? "..." : "Accept & Fight"}
-          </button>
-        )}
+          return (
+            <div
+              key={id.toString()}
+              className="bg-monad-card border border-monad-border rounded-lg p-4 flex items-center justify-between gap-4"
+            >
+              <div className="flex items-center gap-3 flex-1 min-w-0">
+                <span className="text-monad-purple font-bold text-sm whitespace-nowrap">
+                  #{id.toString()}
+                </span>
+                <div className="flex items-center gap-2 flex-1 min-w-0 text-sm">
+                  <span className="text-white truncate">{challengerAgent.name}</span>
+                  <span className="text-gray-500">vs</span>
+                  <span className="text-white truncate">{challengedAgent.name}</span>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-gray-500 whitespace-nowrap">Pending ⏳</span>
+                <button
+                  onClick={() => onAccept(id)}
+                  disabled={isPending || isConfirming}
+                  className="px-3 py-1.5 bg-monad-purple hover:bg-monad-purple/80 disabled:bg-gray-700 text-white text-xs font-bold rounded whitespace-nowrap"
+                >
+                  {isPending || isConfirming ? "..." : "Accept & Fight"}
+                </button>
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
