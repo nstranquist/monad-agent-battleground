@@ -5,7 +5,7 @@ export interface Agent {
   strength: number;
   speed: number;
   intelligence: number;
-  personalityPrompt?: string;
+  personalityPrompt: string;
   wins: bigint;
   losses: bigint;
   createdAt: bigint;
