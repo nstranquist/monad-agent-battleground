@@ -605,8 +605,6 @@ function AgentSelector({
                 </div>
               );
             }
-            // Hide agents owned by test/deployer wallets
-            if (TEST_ADDRESSES.has(agent.owner.toLowerCase())) return null;
             return (
               <AgentCard
                 key={id.toString()}
